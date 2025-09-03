@@ -1,14 +1,112 @@
-# Project
+# Secure Azure AI Agent
 
-> This repo has been populated by an initial template to help get you started. Please
-> make sure to update the content to build a great experience for community-building.
+A secure, enterprise-ready AI agent system for Azure troubleshooting and support scenarios. This application provides intelligent assistance for Azure-related issues through a multi-agent architecture built with Microsoft Semantic Kernel.
 
-As the maintainer of this project, please make a few updates:
+## Features
 
-- Improving this README.MD file to provide a great experience
-- Updating SUPPORT.MD with content about this project's support experience
-- Understanding the security reporting process in SECURITY.MD
-- Remove this section from the README
+- **Multi-Agent Architecture**: Specialized agents for different types of Azure troubleshooting scenarios
+- **Secure by Design**: Enterprise security features with Azure AD integration and secure credential management
+- **Real-time Chat Interface**: Interactive web-based chat powered by Chainlit
+- **Azure Integration**: Deep integration with Azure services and APIs for comprehensive troubleshooting
+- **Observability**: Built-in telemetry and monitoring with OpenTelemetry
+- **Scalable Deployment**: Ready for Azure App Service deployment with infrastructure as code
+
+## Architecture
+
+- **Backend**: FastAPI-based REST API with Semantic Kernel agents
+- **Frontend**: Chainlit web interface for user interactions
+- **Infrastructure**: Azure App Service deployment with Bicep templates
+- **AI Services**: Azure OpenAI integration for intelligent responses
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.8+
+- Azure subscription
+- Azure OpenAI service endpoint
+
+### Local Development
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/microsoft/secure-azureai-agent.git
+   cd secure-azureai-agent
+   ```
+
+2. Copy the environment file and configure your settings:
+   ```bash
+   cp .env.sample .env
+   # Edit .env with your Azure OpenAI and other service configurations
+   ```
+
+3. Install dependencies:
+   ```bash
+   # Backend
+   cd backend
+   pip install -r requirements.txt
+   
+   # Frontend
+   cd ../frontend
+   pip install -r requirements.txt
+   ```
+
+4. Run the application:
+   ```bash
+   # Start backend (in one terminal)
+   cd backend
+   python -m uvicorn src.main:app --reload
+   
+   # Start frontend (in another terminal)
+   cd frontend
+   chainlit run app.py
+   ```
+
+### Azure Deployment
+
+Deploy to Azure using Azure Developer CLI:
+
+```bash
+azd auth login
+azd init
+azd up
+```
+
+## Configuration
+
+Configure the application using environment variables in `.env`:
+
+- `AZURE_OPENAI_ENDPOINT`: Your Azure OpenAI service endpoint
+- `AZURE_OPENAI_API_KEY`: API key for Azure OpenAI
+- `AZURE_OPENAI_DEPLOYMENT_NAME`: Deployment name for your model
+- Additional configuration options available in `.env.sample`
+
+## Documentation
+
+- **[Architecture Overview](./ARCHITECTURE.md)**: System design and technical architecture
+- **[API Documentation](./API.md)**: Detailed API endpoint documentation
+- **[Development Guide](./DEVELOPMENT.md)**: Comprehensive development setup and guidelines
+- **[Deployment Guide](./DEPLOYMENT.md)**: Complete deployment instructions for various environments
+- **[Testing Guide](./TESTING.md)**: Testing strategy, red team testing, and quality assurance
+- **[Changelog](./CHANGELOG.md)**: Version history and release notes
+- **[Support](./SUPPORT.md)**: How to get help and file issues
+- **[Security](./SECURITY.md)**: Security reporting and guidelines
+
+## Agent Capabilities
+
+The system includes specialized agents for different scenarios:
+
+- **Triage Agent**: Intelligent request routing and classification
+- **Technical Support Agent**: General Azure troubleshooting and guidance
+- **Escalation Agent**: Complex issue handling and expert consultation
+- **Foundry Technical Support Agent**: Azure AI Foundry specific support
+
+## Security Features
+
+- Enterprise-grade security with Azure AD integration
+- Secure credential management and environment configuration
+- OpenTelemetry observability for monitoring and compliance
+- Following Microsoft security best practices
 
 ## Contributing
 

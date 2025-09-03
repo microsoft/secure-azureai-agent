@@ -1,25 +1,42 @@
-# TODO: The maintainer of this repo has not yet edited this file
-
-**REPO OWNER**: Do you want Customer Service & Support (CSS) support for this product/project?
-
-- **No CSS support:** Fill out this template with information about how to file issues and get help.
-- **Yes CSS support:** Fill out an intake form at [aka.ms/onboardsupport](https://aka.ms/onboardsupport). CSS will work with/help you to determine next steps.
-- **Not sure?** Fill out an intake as though the answer were "Yes". CSS will help you decide.
-
-*Then remove this first heading from this SUPPORT.MD file before publishing your repo.*
-
 # Support
 
 ## How to file issues and get help  
 
 This project uses GitHub Issues to track bugs and feature requests. Please search the existing 
-issues before filing new issues to avoid duplicates.  For new issues, file your bug or 
+issues before filing new issues to avoid duplicates. For new issues, file your bug or 
 feature request as a new Issue.
 
-For help and questions about using this project, please **REPO MAINTAINER: INSERT INSTRUCTIONS HERE 
-FOR HOW TO ENGAGE REPO OWNERS OR COMMUNITY FOR HELP. COULD BE A STACK OVERFLOW TAG OR OTHER
-CHANNEL. WHERE WILL YOU HELP PEOPLE?**.
+### Before Filing an Issue
+
+1. **Search existing issues** - Check if your issue has already been reported
+2. **Check documentation** - Review the README.md and configuration guides
+3. **Verify environment** - Ensure all prerequisites are met and configuration is correct
+
+### Types of Issues
+
+- **Bug Reports**: Issues with the application functionality
+- **Feature Requests**: Suggestions for new features or improvements
+- **Documentation**: Updates or clarifications needed in documentation
+- **Security**: Please follow the security reporting process in SECURITY.md
+
+### Getting Help
+
+For questions about using this project:
+
+- **GitHub Discussions**: Use GitHub Discussions for general questions and community support
+- **Documentation**: Check the README.md and inline code documentation
+- **Sample Configurations**: Review `.env.sample` for configuration examples
+
+### Response Times
+
+- **Critical bugs affecting security**: 24-48 hours
+- **General bugs and feature requests**: 1-2 weeks
+- **Documentation updates**: 1-2 weeks
+
+### Community Guidelines
+
+Please be respectful and constructive in all interactions. Follow the Microsoft Open Source Code of Conduct referenced in this repository.
 
 ## Microsoft Support Policy  
 
-Support for this **PROJECT or PRODUCT** is limited to the resources listed above.
+Support for this project is limited to the resources listed above. This is a community-driven open source project and is not covered by Microsoft's commercial support offerings.

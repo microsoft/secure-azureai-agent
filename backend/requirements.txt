@@ -9,6 +9,6 @@ opentelemetry-api==1.21.0
 opentelemetry-sdk==1.21.0
 opentelemetry-instrumentation-fastapi==0.42b0
 pydantic==2.5.0
-python-multipart==0.0.6
+python-multipart==0.0.18
 httpx==0.25.2
 python-dotenv==1.0.0

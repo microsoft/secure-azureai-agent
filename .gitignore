@@ -205,3 +205,63 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Azure AI / Machine Learning
+*.model
+*.pkl
+*.h5
+*.onnx
+*.pt
+*.pth
+models/
+checkpoints/
+
+# Chainlit specific
+.chainlit/
+.files/
+public/
+.literal/
+
+# Azure deployment artifacts
+.azure/
+deployment_outputs.json
+
+# Security and sensitive files
+secrets.yaml
+secrets.json
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+
+# Evaluation and testing artifacts
+eval/results/
+eval/outputs/
+eval/.scan_*/
+*.scan_*/
+
+# Temporary files and caches
+temp/
+tmp/
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Local configuration overrides
+local.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

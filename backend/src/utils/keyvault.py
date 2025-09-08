@@ -54,7 +54,7 @@ def get_secret_from_keyvault(secret_name: str, key_vault_url: Optional[str] = No
             logger.info(f"Retrieved secret '{secret_name}' from environment variable")
             return value
     
-    logger.warning(f"Secret '{secret_name}' not found in Key Vault or environment variables")
+    logger.warning("A required secret was not found in Key Vault or environment variables")
     return None
 
 

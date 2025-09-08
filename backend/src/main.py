@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 import uvicorn
 import os
@@ -32,13 +34,44 @@ app = FastAPI(
 )
 
 # CORS middleware for frontend communication
+# Get allowed origins from environment variable
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8501")
+ALLOWED_ORIGINS = [FRONTEND_URL] if FRONTEND_URL else ["http://localhost:8501"]
+
+# Add additional localhost origins for development
+if os.getenv("ENVIRONMENT", "development") == "development":
+    ALLOWED_ORIGINS.extend(["http://localhost:8501", "http://127.0.0.1:8501"])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify the frontend URL
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],  # Restrict to necessary methods
+    allow_headers=["Accept", "Content-Type", "Authorization"],
 )
+
+# Add security middleware for production
+if os.getenv("ENVIRONMENT") == "production":
+    # Trust only specified hosts
+    allowed_hosts = [os.getenv("ALLOWED_HOST", "localhost")]
+    if FRONTEND_URL:
+        from urllib.parse import urlparse
+        parsed = urlparse(FRONTEND_URL)
+        if parsed.hostname:
+            allowed_hosts.append(parsed.hostname)
+    
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+
+# Security headers middleware
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    if os.getenv("ENVIRONMENT") == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 # Request/Response models
 class ChatRequest(BaseModel):
@@ -68,6 +101,16 @@ async def startup_event():
             logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
             logger.error("Please check your .env file or environment configuration.")
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+        
+        # Security validation for production
+        if os.getenv("ENVIRONMENT") == "production":
+            # Ensure sensitive tracing is disabled in production
+            if os.getenv("SEMANTICKERNEL_EXPERIMENTAL_GENAI_ENABLE_OTEL_DIAGNOSTICS_SENSITIVE", "false").lower() == "true":
+                logger.warning("⚠️  Sensitive tracing is enabled in production. Consider disabling for security.")
+            
+            # Ensure content recording is controlled
+            if os.getenv("AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED", "false").lower() == "true":
+                logger.warning("⚠️  Content recording is enabled in production. Consider disabling for privacy.")
         
         logger.info("Initializing Azure Troubleshoot Agent...")
         agent = AzureTroubleshootAgent()

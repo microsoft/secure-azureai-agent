@@ -74,12 +74,23 @@ azd up
 
 ## Configuration
 
-Configure the application using environment variables in `.env`:
+Environment variables are now centrally documented in `CONFIGURATION.md`.
 
-- `AZURE_OPENAI_ENDPOINT`: Your Azure OpenAI service endpoint
-- `AZURE_OPENAI_API_KEY`: API key for Azure OpenAI
-- `AZURE_OPENAI_DEPLOYMENT_NAME`: Deployment name for your model
-- Additional configuration options available in `.env.sample`
+Minimal required variables to run locally:
+
+```
+AZURE_OPENAI_ENDPOINT=...
+AZURE_OPENAI_API_KEY=...
+```
+
+Optional (typical) additions:
+
+```
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4
+BACKEND_API_URL=http://localhost:8000
+```
+
+See `CONFIGURATION.md` for full list, production hardening guidance, and Foundry agent mode settings.
 
 ## Documentation
 

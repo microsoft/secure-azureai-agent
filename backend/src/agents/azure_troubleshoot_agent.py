@@ -17,6 +17,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from telemetry.setup import get_tracer
 
+# Try to import Key Vault utilities, handle gracefully if not available
+try:
+    from utils.keyvault import get_secret_from_keyvault
+    KEYVAULT_UTILS_AVAILABLE = True
+except ImportError:
+    logging.warning("Key Vault utilities not available")
+    KEYVAULT_UTILS_AVAILABLE = False
+    
+    def get_secret_from_keyvault(secret_name: str) -> Optional[str]:
+        return os.getenv(secret_name)
+
 logger = logging.getLogger(__name__)
 
 class AzureTroubleshootAgent:
@@ -47,12 +58,12 @@ class AzureTroubleshootAgent:
         """Initialize the multi-agent system"""
         with self.tracer.start_as_current_span("agent_initialization"):
             try:
-                # Setup Azure OpenAI service
-                api_key = os.getenv("AZURE_OPENAI_API_KEY")
-                endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+                # Setup Azure OpenAI service using secure credential retrieval
+                api_key = get_secret_from_keyvault("AZURE_OPENAI_API_KEY")
+                endpoint = get_secret_from_keyvault("AZURE_OPENAI_ENDPOINT") or os.getenv("AZURE_OPENAI_ENDPOINT")
                 deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4")
                 project_endpoint = os.getenv("PROJECT_ENDPOINT")
-                foundry_technical_support_agent_id = os.getenv("FOUNDARY_TECHNICAL_SUPPORT_AGENT_ID")
+                foundry_technical_support_agent_id = get_secret_from_keyvault("FOUNDARY_TECHNICAL_SUPPORT_AGENT_ID")
                 
                 # Check if agent mode is enabled (default: False for agentless mode)
                 use_azure_ai_agent = os.getenv("USE_AZURE_AI_AGENT", "false").lower() in ("true", "1", "yes", "on")

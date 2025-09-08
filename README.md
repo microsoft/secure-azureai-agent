@@ -36,7 +36,12 @@ A secure, enterprise-ready AI agent system for Azure troubleshooting and support
 
 2. Copy the environment file and configure your settings:
    ```bash
+   # For hands-on workshops (recommended for beginners)
+   cp .env.template .env
+   
+   # For standard development
    cp .env.sample .env
+   
    # Edit .env with your Azure OpenAI and other service configurations
    ```
 
@@ -64,6 +69,25 @@ A secure, enterprise-ready AI agent system for Azure troubleshooting and support
 
 ### Azure Deployment
 
+## 🎓 ハンズオン形式で学ぶ
+このプロジェクトはハンズオン形式で学習できるように設計されています。既存のAzureリソースを使用してCI/CDパイプラインを構築し、Pythonアプリケーションをデプロイする方法を学べます。
+
+**👉 [ハンズオンガイドを始める](HANDS-ON-GUIDE.md)**
+
+### 📖 詳細なドキュメント
+- [DEPLOYMENT.md](DEPLOYMENT.md) - 詳細なデプロイメント手順
+- [EXISTING-RESOURCES-CONFIG.md](EXISTING-RESOURCES-CONFIG.md) - 既存リソース使用時の設定
+- [DEVELOPMENT.md](DEVELOPMENT.md) - 開発環境のセットアップ
+- [TESTING.md](TESTING.md) - テスト実行方法
+
+### 🚀 クイックスタート
+
+#### 既存のAzureリソースがある場合:
+1. [ハンズオンガイド](HANDS-ON-GUIDE.md)に従って設定を更新
+2. CI/CDパイプラインを実行
+3. アプリケーションの動作を確認
+
+#### 新規でリソースを作成する場合:
 Deploy to Azure using Azure Developer CLI:
 
 ```bash

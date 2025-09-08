@@ -1,0 +1,149 @@
+name: Azure App Service - Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  # ============================================
+  # 🔧 ハンズオン設定: 以下を個人の環境に合わせて変更してください
+  # ============================================
+  
+  # 既存Azureリソースの設定 (az resource list で確認可能)
+  AZURE_WEBAPP_BACKEND_NAME: 'redteaming-demo-back-swe-mkurahara'   # 🔧 変更必要: あなたのバックエンドApp Service名
+  AZURE_WEBAPP_FRONTEND_NAME: 'redteaming-demo-front-swe-mkurahara' # 🔧 変更必要: あなたのフロントエンドApp Service名
+  AZURE_RESOURCE_GROUP: 'redteaming-demo-rg-swe-mkurahara'          # 🔧 変更必要: あなたのResource Group名
+  
+  # その他の設定
+  PYTHON_VERSION: '3.11'                                            # 必要に応じて変更 (3.11, 3.12など)
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install backend dependencies
+      run: |
+        cd backend
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Install frontend dependencies
+      run: |
+        cd frontend
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run backend tests
+      run: |
+        cd backend
+        # Add test commands here when tests are available
+        # python -m pytest tests/
+
+    - name: Upload backend artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: backend-app
+        path: backend/
+
+    - name: Upload frontend artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: frontend-app
+        path: frontend/
+
+  # インフラストラクチャのデプロイは既存リソースを使用するためスキップ
+  # deploy-infrastructure:
+  #   runs-on: ubuntu-latest
+  #   if: github.ref == 'refs/heads/main'
+  #   needs: build-and-test
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Setup Azure CLI
+      uses: azure/CLI@v1
+      with:
+        azcliversion: latest
+
+    - name: Install Azure Developer CLI
+      run: |
+        curl -fsSL https://aka.ms/install-azd.sh | bash
+
+    - name: Deploy infrastructure with azd
+      run: |
+        azd auth login --client-id ${{ secrets.AZURE_CLIENT_ID }} --client-secret ${{ secrets.AZURE_CLIENT_SECRET }} --tenant-id ${{ secrets.AZURE_TENANT_ID }}
+        azd env new production --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --location "East US"
+        azd provision --no-prompt
+      env:
+        AZURE_ENV_NAME: production
+        AZURE_LOCATION: eastus
+        AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+  deploy-backend:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Download backend artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: backend-app
+        path: backend/
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Deploy to Azure App Service (Backend)
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.AZURE_WEBAPP_BACKEND_NAME }}
+        slot-name: production
+        package: backend/
+        startup-command: 'gunicorn --bind 0.0.0.0:8000 src.main:app -k uvicorn.workers.UvicornWorker'
+
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    needs: [build-and-test, deploy-backend]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Download frontend artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: frontend-app
+        path: frontend/
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Deploy to Azure App Service (Frontend)
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.AZURE_WEBAPP_FRONTEND_NAME }}
+        slot-name: production
+        package: frontend/
+        startup-command: 'chainlit run app.py --host 0.0.0.0 --port 8000'

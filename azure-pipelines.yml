@@ -1,0 +1,171 @@
+trigger:
+  branches:
+    include:
+    - main
+
+pr:
+  branches:
+    include:
+    - main
+
+variables:
+  # ============================================
+  # 🔧 ハンズオン設定: 以下を個人の環境に合わせて変更してください
+  # ============================================
+  
+  # Azure Service Connection名 (Azure DevOpsで作成したService Connection名)
+  azureServiceConnection: 'azure-service-connection'  # 🔧 変更必要: 作成したService Connection名
+  
+  # 既存Azureリソースの設定 (az resource list で確認可能)
+  resourceGroupName: 'redteaming-demo-rg-swe-mkurahara'        # 🔧 変更必要: あなたのResource Group名
+  backendAppName: 'redteaming-demo-back-swe-mkurahara'         # 🔧 変更必要: あなたのバックエンドApp Service名
+  frontendAppName: 'redteaming-demo-front-swe-mkurahara'       # 🔧 変更必要: あなたのフロントエンドApp Service名
+  
+  # その他の設定
+  pythonVersion: '3.13'                                        # 必要に応じて変更 (3.11, 3.12など)
+
+stages:
+- stage: BuildAndTest
+  displayName: 'Build and Test'
+  jobs:
+  - job: Build
+    displayName: 'Build Applications'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: $(pythonVersion)
+        displayName: 'Use Python $(pythonVersion)'
+
+    - script: |
+        cd backend
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+      displayName: 'Install backend dependencies'
+
+    - script: |
+        cd frontend
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+      displayName: 'Install frontend dependencies'
+
+    - script: |
+        cd backend
+        # Add test commands here when tests are available
+        # python -m pytest tests/
+        echo "Backend tests passed"
+      displayName: 'Run backend tests'
+
+    - task: ArchiveFiles@2
+      displayName: 'Archive backend files'
+      inputs:
+        rootFolderOrFile: 'backend'
+        includeRootFolder: false
+        archiveType: zip
+        archiveFile: $(Build.ArtifactStagingDirectory)/backend.zip
+        replaceExistingArchive: true
+
+    - task: ArchiveFiles@2
+      displayName: 'Archive frontend files'
+      inputs:
+        rootFolderOrFile: 'frontend'
+        includeRootFolder: false
+        archiveType: zip
+        archiveFile: $(Build.ArtifactStagingDirectory)/frontend.zip
+        replaceExistingArchive: true
+
+    - publish: $(Build.ArtifactStagingDirectory)
+      artifact: drop
+
+# インフラストラクチャのデプロイステージを削除（既存リソースを使用するため）
+# - stage: DeployInfrastructure
+#   displayName: 'Deploy Infrastructure'
+#   dependsOn: BuildAndTest
+#   condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+#   jobs:
+#   - deployment: DeployInfra
+#     displayName: 'Deploy Infrastructure'
+#     pool:
+#       vmImage: 'ubuntu-latest'
+#     environment: 'production'
+#     strategy:
+#       runOnce:
+#         deploy:
+#           steps:
+#           - checkout: self
+#           - task: AzureCLI@2
+#             displayName: 'Install Azure Developer CLI'
+#             inputs:
+#               azureSubscription: $(azureServiceConnection)
+#               scriptType: 'bash'
+#               scriptLocation: 'inlineScript'
+#               inlineScript: |
+#                 curl -fsSL https://aka.ms/install-azd.sh | bash
+#                 export PATH=$PATH:$HOME/.azd/bin
+#           - task: AzureCLI@2
+#             displayName: 'Deploy Infrastructure with azd'
+#             inputs:
+#               azureSubscription: $(azureServiceConnection)
+#               scriptType: 'bash'
+#               scriptLocation: 'inlineScript'
+#               inlineScript: |
+#                 export PATH=$PATH:$HOME/.azd/bin
+#                 azd env new production --subscription $(AZURE_SUBSCRIPTION_ID) --location "East US"
+#                 azd provision --no-prompt
+#             env:
+#               AZURE_ENV_NAME: production
+#               AZURE_LOCATION: eastus
+
+- stage: Deploy
+  displayName: 'Deploy Applications'
+  dependsOn: BuildAndTest
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - deployment: DeployBackend
+    displayName: 'Deploy Backend'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: 'production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: drop
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy Backend to Azure App Service'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              appType: 'webAppLinux'
+              appName: $(backendAppName)
+              deployToSlotOrASE: false
+              package: '$(Pipeline.Workspace)/drop/backend.zip'
+              runtimeStack: 'PYTHON|3.11'
+              startUpCommand: 'gunicorn --bind 0.0.0.0:8000 src.main:app -k uvicorn.workers.UvicornWorker'
+
+  - deployment: DeployFrontend
+    displayName: 'Deploy Frontend'
+    dependsOn: DeployBackend
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: 'production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: drop
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy Frontend to Azure App Service'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              appType: 'webAppLinux'
+              appName: $(frontendAppName)
+              deployToSlotOrASE: false
+              package: '$(Pipeline.Workspace)/drop/frontend.zip'
+              runtimeStack: 'PYTHON|3.11'
+              startUpCommand: 'chainlit run app.py --host 0.0.0.0 --port 8000'

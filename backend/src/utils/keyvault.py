@@ -36,10 +36,10 @@ def get_secret_from_keyvault(secret_name: str, key_vault_url: Optional[str] = No
                 credential = DefaultAzureCredential()
                 client = SecretClient(vault_url=vault_url, credential=credential)
                 secret = client.get_secret(secret_name)
-                logger.info(f"Retrieved secret '{secret_name}' from Key Vault")
+                logger.info("Successfully retrieved secret from Key Vault")
                 return secret.value
         except Exception as e:
-            logger.warning(f"Failed to retrieve secret '{secret_name}' from Key Vault: {e}")
+            logger.warning("Failed to retrieve secret from Key Vault")
             logger.info("Falling back to environment variable")
     
     # Fallback to environment variable
@@ -47,11 +47,11 @@ def get_secret_from_keyvault(secret_name: str, key_vault_url: Optional[str] = No
     if value:
         # Check if it's a Key Vault reference (Azure App Service syntax)
         if value.startswith("@Microsoft.KeyVault("):
-            logger.info(f"Secret '{secret_name}' is configured as Key Vault reference in App Service")
+            logger.info("A secret is configured as Key Vault reference in App Service")
             # Azure App Service will resolve this automatically
             return value
         else:
-            logger.info(f"Retrieved secret '{secret_name}' from environment variable")
+            logger.info("Retrieved secret from environment variable")
             return value
     
     logger.warning(f"Secret '{secret_name}' not found in Key Vault or environment variables")

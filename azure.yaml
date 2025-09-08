@@ -1,15 +1,11 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/refs/heads/main/schemas/v1.0/azure.yaml.json
 
-name: secure-azureai-agent
+name: secure-azureai-agent-frontend
 
 infra:
   provider: bicep
 
 services:
-  backend:
-    project: backend
-    host: appservice
-    language: python
   frontend:
     project: frontend
     host: appservice

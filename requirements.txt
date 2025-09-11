@@ -19,10 +19,10 @@ httpx==0.28.1
 python-dotenv==1.1.1
 
 # Frontend dependencies (Chainlit frontend)
-chainlit
+chainlit==2.7.1.1
 
 # Evaluation dependencies
 azure-ai-evaluation[redteam]
 
-# Note: Some dependencies like httpx, python-dotenv, and pydantic are already included above
-# and don't need to be duplicated. Azure-identity is also already included from backend.
+# Note: Frontend dependencies like httpx, python-dotenv, and pydantic are already included above
+# from backend dependencies, so they don't need to be duplicated here.

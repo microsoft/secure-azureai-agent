@@ -1,4 +1,4 @@
-chainlit
-httpx
-python-dotenv
-pydantic
+chainlit==2.7.1.1
+httpx==0.28.1
+python-dotenv==1.1.1
+pydantic==2.11.7

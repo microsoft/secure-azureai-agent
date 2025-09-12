@@ -35,20 +35,7 @@ az cognitiveservices account list --query "[].{Name:name, Kind:kind, ResourceGro
 
 ## 🔧 手順2: 設定ファイルの更新
 
-### 2.1 Azure DevOps Pipeline設定
-
-`azure-pipelines.yml` ファイルの以下の箇所を更新：
-
-```yaml
-variables:
-  # 🔧 ここを変更してください
-  azureServiceConnection: 'your-service-connection-name'    # 作成するService Connection名
-  resourceGroupName: 'your-resource-group-name'             # あなたのResource Group名
-  backendAppName: 'your-backend-app-service-name'           # あなたのバックエンドApp Service名
-  frontendAppName: 'your-frontend-app-service-name'         # あなたのフロントエンドApp Service名
-```
-
-### 2.2 GitHub Actions設定
+### GitHub Actions設定
 
 `.github/workflows/azure-webapp-deploy.yml` ファイルの以下の箇所を更新：
 
@@ -60,7 +47,7 @@ env:
   AZURE_RESOURCE_GROUP: 'your-resource-group-name'             # あなたのResource Group名
 ```
 
-### 2.3 App Service設定スクリプト
+### App Service設定スクリプト
 
 `scripts/configure-existing-resources.sh` ファイルの以下の箇所を更新：
 
@@ -163,7 +150,6 @@ az ad sp create-for-rbac --name "secure-azureai-agent-sp" \
 
 以下のファイルが既存リソース用に更新されました：
 
-- ✅ `azure-pipelines.yml` - Azure DevOps設定
 - ✅ `.github/workflows/azure-webapp-deploy.yml` - GitHub Actions設定
 - ✅ `scripts/configure-existing-resources.sh` - App Service設定スクリプト
 
@@ -171,12 +157,10 @@ az ad sp create-for-rbac --name "secure-azureai-agent-sp" \
 
 ### 準備
 1. ☑️ App Service設定を更新（上記スクリプト実行）
-2. ☑️ Pipeline変数/シークレットを設定
-3. ☑️ Service Connectionを作成
+2. ☑️ GitHub Secretsを設定
 
 ### 実行
-1. **Azure DevOps**: パイプラインを実行
-2. **GitHub Actions**: mainブランチにpushまたは手動実行
+**GitHub Actions**: mainブランチにpushまたは手動実行
 
 パイプラインは以下を実行します：
 - ✅ ビルドとテスト

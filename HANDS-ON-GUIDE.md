@@ -6,15 +6,15 @@
 
 ### 🎯 目標
 - 既存のAzure App Serviceリソースを活用
-- Azure DevOps または GitHub Actions でCI/CDパイプラインを構築
+- GitHub ActionsでCI/CDパイプラインを構築
 - Python Webアプリケーション（フロントエンド・バックエンド）の自動デプロイ
 
 ### 🏗️ アーキテクチャ
 ```
 Developer
     ↓ (git push)
-GitHub/Azure DevOps
-    ↓ (CI/CD Pipeline)
+GitHub
+    ↓ (GitHub Actions CI/CD Pipeline)
 Azure App Service (Frontend + Backend)
     ↓ (AI機能)
 Azure AI Foundry/OpenAI
@@ -78,16 +78,7 @@ nano .env  # ターミナルで編集
 
 以下のファイルで `🔧 変更必要` とマークされた箇所を更新してください：
 
-#### A. Azure DevOps Pipeline (`azure-pipelines.yml`)
-```yaml
-variables:
-  azureServiceConnection: 'azure-service-connection'  # 🔧 Service Connection名
-  resourceGroupName: 'your-resource-group-name'       # 🔧 あなたのRG名
-  backendAppName: 'your-backend-app-name'             # 🔧 バックエンドApp Service名
-  frontendAppName: 'your-frontend-app-name'           # 🔧 フロントエンドApp Service名
-```
-
-#### B. GitHub Actions (`.github/workflows/azure-webapp-deploy.yml`)
+#### GitHub Actions (`.github/workflows/azure-webapp-deploy.yml`)
 ```yaml
 env:
   AZURE_WEBAPP_BACKEND_NAME: 'your-backend-app-name'   # 🔧 バックエンドApp Service名
@@ -136,32 +127,7 @@ az webapp config show --name <your-frontend-app-name> --resource-group <your-rg-
 
 ## 🔐 Step 4: CI/CDパイプラインの設定
 
-### Option A: Azure DevOps を使用する場合
-
-#### 4.1 Service Principalの作成
-```bash
-az ad sp create-for-rbac --name "your-app-sp" \
-  --role Contributor \
-  --scopes /subscriptions/<your-subscription-id>/resourceGroups/<your-rg-name> \
-  --sdk-auth
-```
-
-#### 4.2 Azure DevOpsでService Connection作成
-1. Azure DevOps Project → Project Settings
-2. Service connections → New service connection
-3. Azure Resource Manager → Service principal (manual)
-4. 上記で作成したService Principalの情報を入力
-5. Connection name: `azure-service-connection` (または更新した名前)
-
-#### 4.3 Pipeline作成
-1. Azure DevOps → Pipelines → New pipeline
-2. GitHub/Azure Repos を選択
-3. `azure-pipelines.yml` を選択
-4. Save and run
-
-### Option B: GitHub Actions を使用する場合
-
-#### 4.1 GitHub Secretsの設定
+### GitHub Secretsの設定
 Repository → Settings → Secrets and variables → Actions
 
 **Secrets:**
@@ -173,7 +139,7 @@ Repository → Settings → Secrets and variables → Actions
 - `AZURE_WEBAPP_FRONTEND_NAME`: フロントエンドApp Service名  
 - `AZURE_RESOURCE_GROUP`: Resource Group名
 
-#### 4.2 Workflow実行
+#### Workflow実行
 - mainブランチにpushすると自動実行
 - または Actions タブから手動実行
 
@@ -242,7 +208,6 @@ az webapp cors add --name <backend-app-name> --resource-group <rg-name> --allowe
 ## 📚 参考リンク
 
 - [Azure App Service Documentation](https://docs.microsoft.com/azure/app-service/)
-- [Azure DevOps Pipelines](https://docs.microsoft.com/azure/devops/pipelines/)
 - [GitHub Actions for Azure](https://docs.microsoft.com/azure/developer/github/github-actions)
 
 ## 🏆 次のステップ

@@ -1,6 +1,7 @@
 name: Azure App Service - Deploy to Production
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -52,17 +53,35 @@ jobs:
         # Add test commands here when tests are available
         # python -m pytest tests/
 
+    - name: Package backend (zip)
+      run: |
+        cd backend
+        zip -r ../backend-package.zip . \
+          -x "*.git*" "*__pycache__*" "*.pyc" "*.pyo" "*.pyd" \
+          ".env" "*.pytest_cache*" "*.DS_Store"
+        cd ..
+        ls -lh backend-package.zip
+
+    - name: Package frontend (zip)
+      run: |
+        cd frontend
+        zip -r ../frontend-package.zip . \
+          -x "*.git*" "*__pycache__*" "*.pyc" "*.pyo" "*.pyd" \
+          ".env" "*.pytest_cache*" "*.DS_Store"
+        cd ..
+        ls -lh frontend-package.zip
+
     - name: Upload backend artifact
       uses: actions/upload-artifact@v4
       with:
         name: backend-app
-        path: backend/
+        path: backend-package.zip
 
     - name: Upload frontend artifact
       uses: actions/upload-artifact@v4
       with:
         name: frontend-app
-        path: frontend/
+        path: frontend-package.zip
 
   # インフラストラクチャのデプロイは既存リソースを使用するためスキップ
   # deploy-infrastructure:
@@ -101,14 +120,20 @@ jobs:
   deploy-backend:
     runs-on: ubuntu-latest
     needs: build-and-test
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     
     steps:
     - name: Download backend artifact
       uses: actions/download-artifact@v4
       with:
         name: backend-app
-        path: backend/
+        path: ./
+
+    - name: Unzip backend artifact
+      run: |
+        rm -rf backend || true
+        unzip -q backend-package.zip -d backend
+        ls -R1 backend | head -50
 
     - name: Azure Login
       uses: azure/login@v1
@@ -138,14 +163,20 @@ jobs:
   deploy-frontend:
     runs-on: ubuntu-latest
     needs: [build-and-test, deploy-backend]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     
     steps:
     - name: Download frontend artifact
       uses: actions/download-artifact@v4
       with:
         name: frontend-app
-        path: frontend/
+        path: ./
+
+    - name: Unzip frontend artifact
+      run: |
+        rm -rf frontend || true
+        unzip -q frontend-package.zip -d frontend
+        ls -R1 frontend | head -50
 
     - name: Azure Login
       uses: azure/login@v1

@@ -129,36 +129,52 @@ jobs:
         name: backend-app
         path: ./
 
-    - name: Unzip backend artifact
-      run: |
-        rm -rf backend || true
-        unzip -q backend-package.zip -d backend
-        ls -R1 backend | head -50
-
     - name: Azure Login
       uses: azure/login@v1
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - name: Deploy to Azure App Service (Backend)
-      uses: azure/webapps-deploy@v3
-      with:
-        app-name: ${{ env.AZURE_WEBAPP_BACKEND_NAME }}
-        package: backend-package.zip
-        clean: true
-        startup-command: 'gunicorn --bind 0.0.0.0:$PORT src.main:app -k uvicorn.workers.UvicornWorker'
-
-    - name: Retry on Conflict (Backend)
-      if: failure()
+    - name: Backend Deploy (config-zip with retry)
       run: |
-        echo "Initial backend deploy failed, attempting serialized retry (possible 409)." 
-        for i in 1 2 3; do
-          echo "Retry attempt $i";
-          az webapp deployment source config-zip \
+        set -euo pipefail
+        echo "Setting startup command (pre-deploy)"
+        az webapp config set \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --startup-file 'gunicorn --bind 0.0.0.0:$PORT src.main:app -k uvicorn.workers.UvicornWorker'
+
+        echo "Configure app settings (avoid Oryx build)"
+        az webapp config appsettings set \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false WEBSITE_RUN_FROM_PACKAGE=0
+
+        echo "Attempting deployment via config-zip with exponential backoff"
+        ZIP=backend-package.zip
+        MAX=4
+        DELAY=5
+        for i in $(seq 1 $MAX); do
+          echo "Deploy attempt $i/$MAX";
+          if az webapp deployment source config-zip \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-            --src backend-package.zip && break || sleep 10;
+            --src "$ZIP"; then
+              echo "Deploy succeeded"; SUCCESS=1; break; fi
+          echo "Deploy failed (possibly 409). Sleeping $DELAY s"; sleep $DELAY; DELAY=$((DELAY*2));
         done
+        if [ "${SUCCESS:-0}" != "1" ]; then
+          echo "All deploy attempts failed" >&2; exit 1; fi
+
+        echo "Syncing and restarting"
+        az webapp restart \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
+
+        echo "Show recent deployment logs metadata"
+        az webapp deployment list \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --query '[0]' || true
 
     - name: Set Backend Environment Variables
       run: |

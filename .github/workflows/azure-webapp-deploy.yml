@@ -141,12 +141,24 @@ jobs:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
     - name: Deploy to Azure App Service (Backend)
-      uses: azure/webapps-deploy@v2
+      uses: azure/webapps-deploy@v3
       with:
         app-name: ${{ env.AZURE_WEBAPP_BACKEND_NAME }}
-        slot-name: production
-        package: backend/
+        package: backend-package.zip
+        clean: true
         startup-command: 'gunicorn --bind 0.0.0.0:$PORT src.main:app -k uvicorn.workers.UvicornWorker'
+
+    - name: Retry on Conflict (Backend)
+      if: failure()
+      run: |
+        echo "Initial backend deploy failed, attempting serialized retry (possible 409)." 
+        for i in 1 2 3; do
+          echo "Retry attempt $i";
+          az webapp deployment source config-zip \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+            --src backend-package.zip && break || sleep 10;
+        done
 
     - name: Set Backend Environment Variables
       run: |
@@ -190,12 +202,24 @@ jobs:
         echo "BACKEND_URL=https://$BACKEND_URL" >> $GITHUB_OUTPUT
 
     - name: Deploy to Azure App Service (Frontend)
-      uses: azure/webapps-deploy@v2
+      uses: azure/webapps-deploy@v3
       with:
         app-name: ${{ env.AZURE_WEBAPP_FRONTEND_NAME }}
-        slot-name: production
-        package: frontend/
+        package: frontend-package.zip
+        clean: true
         startup-command: 'chainlit run app.py --host 0.0.0.0 --port $PORT'
+
+    - name: Retry on Conflict (Frontend)
+      if: failure()
+      run: |
+        echo "Initial frontend deploy failed, attempting serialized retry (possible 409)." 
+        for i in 1 2 3; do
+          echo "Retry attempt $i";
+          az webapp deployment source config-zip \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+            --src frontend-package.zip && break || sleep 10;
+        done
 
     - name: Set Frontend Environment Variables
       run: |

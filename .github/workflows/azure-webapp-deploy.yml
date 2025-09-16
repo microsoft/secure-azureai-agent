@@ -143,34 +143,38 @@ jobs:
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --startup-file 'gunicorn --bind 0.0.0.0:$PORT src.main:app -k uvicorn.workers.UvicornWorker'
 
-        echo "Configure app settings (avoid Oryx build)"
+        echo "Configure app settings (use run-from-package)"
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false WEBSITE_RUN_FROM_PACKAGE=0
+          --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false WEBSITE_RUN_FROM_PACKAGE=1
 
-        echo "Attempting deployment via config-zip with exponential backoff"
+        echo "Deploying via az webapp deploy (recommended approach)"
         ZIP=backend-package.zip
-        MAX=4
-        DELAY=5
+        MAX=3
+        DELAY=10
         for i in $(seq 1 $MAX); do
-          echo "Deploy attempt $i/$MAX";
-          if az webapp deployment source config-zip \
+          echo "Deploy attempt $i/$MAX using az webapp deploy";
+          if az webapp deploy \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-            --src "$ZIP"; then
+            --src-path "$ZIP" \
+            --type zip; then
               echo "Deploy succeeded"; SUCCESS=1; break; fi
-          echo "Deploy failed (possibly 409). Sleeping $DELAY s"; sleep $DELAY; DELAY=$((DELAY*2));
+          echo "Deploy failed. Sleeping $DELAY s"; sleep $DELAY; DELAY=$((DELAY+10));
         done
         if [ "${SUCCESS:-0}" != "1" ]; then
           echo "All deploy attempts failed" >&2; exit 1; fi
 
-        echo "Syncing and restarting"
+        echo "Syncing and waiting for app to initialize"
         az webapp restart \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
 
-        echo "Show recent deployment logs metadata"
+        echo "Waiting for app startup (30s)"
+        sleep 30
+
+        echo "Show recent deployment status"
         az webapp deployment list \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \

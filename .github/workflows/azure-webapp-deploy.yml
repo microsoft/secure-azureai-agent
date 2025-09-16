@@ -19,7 +19,7 @@ env:
   AZURE_RESOURCE_GROUP: 'redteaming-demo-rg-swe-mkurahara'          # 🔧 変更必要: あなたのResource Group名
   
   # その他の設定
-  PYTHON_VERSION: '3.13'                                           # 必要に応じて変更 (3.11, 3.12など)
+  PYTHON_VERSION: '3.11'                                           # Chainlitとの互換性のため3.11を使用
 
 jobs:
   build-and-test:
@@ -129,6 +129,11 @@ jobs:
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --settings PORT=8000
+        
+        az webapp config set \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --linux-fx-version "PYTHON|3.11"
 
   deploy-frontend:
     runs-on: ubuntu-latest
@@ -167,3 +172,9 @@ jobs:
           --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --settings BACKEND_API_URL="${{ steps.backend-url.outputs.BACKEND_URL }}" PORT=8000
+        
+        az webapp config set \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --linux-fx-version "PYTHON|3.11" \
+          --web-sockets-enabled true

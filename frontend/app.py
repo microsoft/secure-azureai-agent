@@ -207,5 +207,5 @@ if __name__ == "__main__":
     # Note: In production, use chainlit CLI commands instead
     logger.info(f"Starting Chainlit app on port {port}")
     
-    # This is a placeholder - in practice, use: chainlit run app.py --port 8501
+    # This is a placeholder - in practice, use: chainlit run app.py --port {port}
     print(f"To run this app, use: chainlit run app.py --port {port}")

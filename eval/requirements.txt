@@ -1,2 +1,46 @@
+# Azure AI Search RAG Evaluation System Dependencies
+
+# Existing dependencies
 azure-identity
 azure-ai-evaluation[redteam]
+
+# Additional dependencies for RAG evaluation
+# Core Azure SDKs
+azure-search-documents>=11.4.0
+openai>=1.12.0
+
+# RAG Evaluation
+ragas>=0.1.0
+datasets>=2.16.0
+
+# Data Processing and Analysis  
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Environment Configuration
+python-dotenv>=1.0.0
+
+# Async support
+asyncio-throttle>=1.0.2
+aiohttp>=3.9.0
+
+# Utilities
+pydantic>=2.0.0
+typing-extensions>=4.8.0
+
+# Logging and Monitoring
+structlog>=23.0.0
+
+# Development and Testing (optional)
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+black>=23.0.0
+isort>=5.12.0
+mypy>=1.7.0
+
+# Jupyter support (for notebook examples)
+jupyter>=1.0.0
+ipywidgets>=8.0.0
+matplotlib>=3.7.0
+seaborn>=0.12.0

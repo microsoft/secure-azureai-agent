@@ -121,7 +121,14 @@ jobs:
         app-name: ${{ env.AZURE_WEBAPP_BACKEND_NAME }}
         slot-name: production
         package: backend/
-        startup-command: 'gunicorn --bind 0.0.0.0:8000 src.main:app -k uvicorn.workers.UvicornWorker'
+        startup-command: 'gunicorn --bind 0.0.0.0:$PORT src.main:app -k uvicorn.workers.UvicornWorker'
+
+    - name: Set Backend Environment Variables
+      run: |
+        az webapp config appsettings set \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --settings PORT=8000
 
   deploy-frontend:
     runs-on: ubuntu-latest
@@ -140,10 +147,23 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+    - name: Get Backend URL
+      id: backend-url
+      run: |
+        BACKEND_URL=$(az webapp show --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query defaultHostName -o tsv)
+        echo "BACKEND_URL=https://$BACKEND_URL" >> $GITHUB_OUTPUT
+
     - name: Deploy to Azure App Service (Frontend)
       uses: azure/webapps-deploy@v2
       with:
         app-name: ${{ env.AZURE_WEBAPP_FRONTEND_NAME }}
         slot-name: production
         package: frontend/
-        startup-command: 'chainlit run app.py --host 0.0.0.0 --port 8000'
+        startup-command: 'chainlit run app.py --host 0.0.0.0 --port $PORT'
+
+    - name: Set Frontend Environment Variables
+      run: |
+        az webapp config appsettings set \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --settings BACKEND_API_URL="${{ steps.backend-url.outputs.BACKEND_URL }}" PORT=8000

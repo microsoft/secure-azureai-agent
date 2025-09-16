@@ -118,7 +118,7 @@ resource backendAppService 'Microsoft.Web/sites@2024-11-01' = {
     httpsOnly: true
     siteConfig: {
       linuxFxVersion: 'PYTHON|3.11'
-      appCommandLine: 'gunicorn --bind 0.0.0.0:8000 src.main:app -k uvicorn.workers.UvicornWorker'
+      appCommandLine: 'gunicorn --bind 0.0.0.0:$PORT src.main:app -k uvicorn.workers.UvicornWorker'
       alwaysOn: true
       cors: {
         allowedOrigins: [
@@ -152,6 +152,10 @@ resource backendAppService 'Microsoft.Web/sites@2024-11-01' = {
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
           value: applicationInsights.properties.ConnectionString
+        }
+        {
+          name: 'PORT'
+          value: '8000'
         }
       ]
     }
@@ -205,7 +209,7 @@ resource frontendAppService 'Microsoft.Web/sites@2024-11-01' = {
     httpsOnly: true
     siteConfig: {
       linuxFxVersion: 'PYTHON|3.11'
-      appCommandLine: 'chainlit run app.py --host 0.0.0.0 --port 8000'
+      appCommandLine: 'chainlit run app.py --host 0.0.0.0 --port $PORT'
       alwaysOn: true
       cors: {
         allowedOrigins: ['*']
@@ -223,6 +227,10 @@ resource frontendAppService 'Microsoft.Web/sites@2024-11-01' = {
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
           value: applicationInsights.properties.ConnectionString
+        }
+        {
+          name: 'PORT'
+          value: '8000'
         }
       ]
     }

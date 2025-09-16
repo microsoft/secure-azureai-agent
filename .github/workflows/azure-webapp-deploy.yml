@@ -19,7 +19,7 @@ env:
   AZURE_RESOURCE_GROUP: 'redteaming-demo-rg-swe-mkurahara'          # 🔧 変更必要: あなたのResource Group名
   
   # その他の設定
-  PYTHON_VERSION: '3.11'                                            # 必要に応じて変更 (3.11, 3.12など)
+  PYTHON_VERSION: '3.13'                                           # 必要に応じて変更 (3.11, 3.12など)
 
 jobs:
   build-and-test:

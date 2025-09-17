@@ -55,17 +55,43 @@ jobs:
 
     - name: Package backend (zip)
       run: |
-        # App Serviceのビルドシステムが期待する構造でパッケージング
-        mkdir -p deploy-package/backend
-        cp -r backend/* deploy-package/backend/
+        # 軽量なパッケージを作成
+        echo "Creating optimized backend package..."
+        mkdir -p deploy-package
+        
+        # 必要なファイルのみコピー
+        cp -r backend/src deploy-package/
         cp backend/requirements.txt deploy-package/
+        cp backend/Dockerfile deploy-package/ 2>/dev/null || true
+        
+        # スタートアップスクリプトを作成
+        cat > deploy-package/startup.sh << 'EOF'
+        #!/bin/bash
+        echo "Starting backend application..."
+        cd /home/site/wwwroot
+        if [ -f requirements.txt ]; then
+          echo "Installing requirements..."
+          pip install -r requirements.txt --no-cache-dir
+        fi
+        echo "Launching gunicorn..."
+        gunicorn --bind 0.0.0.0:${PORT:-8000} src.main:app -k uvicorn.workers.UvicornWorker --timeout 120
+        EOF
+        chmod +x deploy-package/startup.sh
+        
         cd deploy-package
         zip -r ../backend-package.zip . \
           -x "*.git*" "*__pycache__*" "*.pyc" "*.pyo" "*.pyd" \
-          ".env" "*.pytest_cache*" "*.DS_Store"
+          ".env" "*.pytest_cache*" "*.DS_Store" "*.log" "*.tmp"
         cd ..
         rm -rf deploy-package
+        
+        echo "Package created successfully"
         ls -lh backend-package.zip
+        PACKAGE_SIZE=$(stat -c%s backend-package.zip)
+        echo "Package size in bytes: $PACKAGE_SIZE"
+        if [[ $PACKAGE_SIZE -gt 524288000 ]]; then
+          echo "WARNING: Package size exceeds 500MB, deployment may timeout"
+        fi
 
     - name: Package frontend (zip)
       run: |
@@ -144,34 +170,62 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+    - name: Pre-deployment cleanup and health check
+      run: |
+        echo "Checking for ongoing deployments..."
+        DEPLOYMENT_STATUS=$(az webapp deployment list \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --query "[?properties.status=='Building' || properties.status=='InProgress'].id" -o tsv)
+        
+        if [ ! -z "$DEPLOYMENT_STATUS" ]; then
+          echo "Found ongoing deployment, waiting..."
+          sleep 60
+        fi
+        
+        echo "Stopping the app service to ensure clean state..."
+        az webapp stop \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
+        
+        sleep 10
+
     - name: Backend Deploy (config-zip with retry)
       run: |
         set -euo pipefail
+        
+        # Start the app service
+        echo "Starting the app service..."
+        az webapp start \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
+        
+        sleep 15
+        
         echo "Setting startup command (pre-deploy)"
         az webapp config set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --startup-file 'cd backend && gunicorn --bind 0.0.0.0:${PORT:-8000} src.main:app -k uvicorn.workers.UvicornWorker'
+          --startup-file 'startup.sh'
 
         echo "Configure app settings (enable build)"
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true WEBSITE_RUN_FROM_PACKAGE=0 PYTHONPATH=/home/site/wwwroot/backend
+          --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false WEBSITE_RUN_FROM_PACKAGE=1 PYTHONPATH=/home/site/wwwroot
 
-        echo "Deploying via az webapp deploy (recommended approach)"
+        echo "Deploying via az webapp deployment source config-zip"
         ZIP=backend-package.zip
         MAX=3
-        DELAY=10
+        DELAY=30
         for i in $(seq 1 $MAX); do
-          echo "Deploy attempt $i/$MAX using az webapp deploy";
-          if az webapp deploy \
+          echo "Deploy attempt $i/$MAX using config-zip";
+          if timeout 600 az webapp deployment source config-zip \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-            --src-path "$ZIP" \
-            --type zip; then
+            --src "$ZIP"; then
               echo "Deploy succeeded"; SUCCESS=1; break; fi
-          echo "Deploy failed. Sleeping $DELAY s"; sleep $DELAY; DELAY=$((DELAY+10));
+          echo "Deploy failed. Sleeping $DELAY s"; sleep $DELAY; DELAY=$((DELAY+30));
         done
         if [ "${SUCCESS:-0}" != "1" ]; then
           echo "All deploy attempts failed" >&2; exit 1; fi
@@ -215,18 +269,22 @@ jobs:
 
     - name: Set Backend Environment Variables
       run: |
+        echo "Setting all environment variables before deployment..."
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --settings \
             PORT=8000 \
-            PYTHONPATH=/home/site/wwwroot/backend \
+            PYTHONPATH=/home/site/wwwroot \
             PYTHONUNBUFFERED=1 \
             ENVIRONMENT=production \
             WEBSITE_PYTHON_VERSION=3.11 \
-            SCM_DO_BUILD_DURING_DEPLOYMENT=true \
-            ENABLE_ORYX_BUILD=true \
-            WEBSITE_RUN_FROM_PACKAGE=0
+            SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+            ENABLE_ORYX_BUILD=false \
+            WEBSITE_RUN_FROM_PACKAGE=1 \
+            WEBSITES_ENABLE_APP_SERVICE_STORAGE=false \
+            WEBSITE_HTTPLOGGING_RETENTION_DAYS=1 \
+            WEBSITE_TIME_ZONE="UTC"
         
         az webapp config set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
@@ -293,9 +351,10 @@ jobs:
             PYTHONPATH=/home/site/wwwroot/frontend \
             PYTHONUNBUFFERED=1 \
             WEBSITE_PYTHON_VERSION=3.11 \
-            SCM_DO_BUILD_DURING_DEPLOYMENT=true \
-            ENABLE_ORYX_BUILD=true \
-            WEBSITE_RUN_FROM_PACKAGE=0
+            SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+            ENABLE_ORYX_BUILD=false \
+            WEBSITE_RUN_FROM_PACKAGE=1 \
+            WEBSITES_ENABLE_APP_SERVICE_STORAGE=false
         
         az webapp config set \
           --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \

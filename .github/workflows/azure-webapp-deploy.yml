@@ -35,17 +35,31 @@ jobs:
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
-    - name: Install backend dependencies
+    - name: Install backend dependencies (optimized)
       run: |
         cd backend
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        # 最適化されたrequirementsを使用
+        if [ -f requirements-optimized.txt ]; then
+          echo "Using optimized requirements..."
+          pip install -r requirements-optimized.txt --no-cache-dir
+        else
+          echo "Using standard requirements..."
+          pip install -r requirements.txt --no-cache-dir
+        fi
 
-    - name: Install frontend dependencies
+    - name: Install frontend dependencies (optimized)
       run: |
         cd frontend
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        # 最適化されたrequirementsを使用
+        if [ -f requirements-optimized.txt ]; then
+          echo "Using optimized requirements..."
+          pip install -r requirements-optimized.txt --no-cache-dir
+        else
+          echo "Using standard requirements..."
+          pip install -r requirements.txt --no-cache-dir
+        fi
 
     - name: Run backend tests
       run: |
@@ -59,9 +73,15 @@ jobs:
         echo "Creating optimized backend package..."
         mkdir -p deploy-package
         
-        # 必要なファイルのみコピー
+        # 必要なファイルのみコピー（最適化版を優先）
         cp -r backend/src deploy-package/
-        cp backend/requirements.txt deploy-package/
+        if [ -f backend/requirements-optimized.txt ]; then
+          echo "Using optimized requirements for deployment..."
+          cp backend/requirements-optimized.txt deploy-package/requirements.txt
+        else
+          echo "Using standard requirements for deployment..."
+          cp backend/requirements.txt deploy-package/
+        fi
         cp backend/Dockerfile deploy-package/ 2>/dev/null || true
         
         # スタートアップスクリプトを作成
@@ -98,7 +118,14 @@ jobs:
         # App Serviceのビルドシステムが期待する構造でパッケージング
         mkdir -p deploy-package/frontend
         cp -r frontend/* deploy-package/frontend/
-        cp frontend/requirements.txt deploy-package/
+        # 最適化されたrequirementsを使用
+        if [ -f frontend/requirements-optimized.txt ]; then
+          echo "Using optimized requirements for frontend deployment..."
+          cp frontend/requirements-optimized.txt deploy-package/requirements.txt
+        else
+          echo "Using standard requirements for frontend deployment..."
+          cp frontend/requirements.txt deploy-package/
+        fi
         cd deploy-package
         zip -r ../frontend-package.zip . \
           -x "*.git*" "*__pycache__*" "*.pyc" "*.pyo" "*.pyd" \
@@ -222,11 +249,18 @@ jobs:
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --startup-file 'startup.sh'
 
-        echo "Configure app settings (enable build)"
+        echo "Configure optimized app settings for performance"
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true PYTHONPATH=/home/site/wwwroot
+          --settings \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+            PYTHONPATH=/home/site/wwwroot \
+            PIP_NO_CACHE_DIR=1 \
+            PIP_DISABLE_PIP_VERSION_CHECK=1 \
+            PYTHONUNBUFFERED=1 \
+            PYTHONDONTWRITEBYTECODE=1 \
+            SCM_BUILD_TIMEOUT=600
 
         echo "Deploying via az webapp deploy (recommended approach)"
         ZIP=backend-package.zip

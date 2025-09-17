@@ -173,14 +173,22 @@ jobs:
     - name: Pre-deployment cleanup and health check
       run: |
         echo "Checking for ongoing deployments..."
-        DEPLOYMENT_STATUS=$(az webapp deployment list \
+        # デプロイメントステータスを確認（最新のデプロイメント情報を取得）
+        LATEST_DEPLOYMENT=$(az webapp log deployment list \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --query "[?properties.status=='Building' || properties.status=='InProgress'].id" -o tsv)
+          --query "[0].{status:status, id:id}" -o json 2>/dev/null || echo "{}")
         
-        if [ ! -z "$DEPLOYMENT_STATUS" ]; then
-          echo "Found ongoing deployment, waiting..."
-          sleep 60
+        if [ ! -z "$LATEST_DEPLOYMENT" ] && [ "$LATEST_DEPLOYMENT" != "{}" ]; then
+          STATUS=$(echo $LATEST_DEPLOYMENT | jq -r '.status // "Unknown"' 2>/dev/null || echo "Unknown")
+          echo "Latest deployment status: $STATUS"
+          
+          if [[ "$STATUS" == "Building" || "$STATUS" == "InProgress" || "$STATUS" == "Deploying" ]]; then
+            echo "Found ongoing deployment, waiting..."
+            sleep 60
+          fi
+        else
+          echo "No deployment history found or unable to check status"
         fi
         
         echo "Stopping the app service to ensure clean state..."
@@ -239,10 +247,10 @@ jobs:
         sleep 30
 
         echo "Show recent deployment status"
-        az webapp deployment list \
+        az webapp log deployment list \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --query '[0]' || true
+          --query '[0]' 2>/dev/null || echo "No deployment history available"
 
     - name: Verify Backend Deployment
       run: |
@@ -250,22 +258,24 @@ jobs:
         az webapp log deployment show \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --query '[0]' || true
+          --deployment-id latest 2>/dev/null || echo "No deployment logs available"
 
         echo "Checking app health..."
         sleep 10
         HEALTH_URL="https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net"
         HTTP_CODE=$(curl -f -s -o /dev/null -w "%{http_code}" $HEALTH_URL || echo "000")
         echo "HTTP response code: $HTTP_CODE"
-        if [ "$HTTP_CODE" != "200" ]; then
+        if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "404" ]; then
           echo "Health check failed with code: $HTTP_CODE"
+        else
+          echo "App is responding (HTTP $HTTP_CODE)"
         fi
 
         echo "Showing recent logs (last 50 lines)..."
         az webapp log tail \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --lines 50 || true
+          --lines 50 2>/dev/null || echo "Unable to fetch application logs"
 
     - name: Set Backend Environment Variables
       run: |

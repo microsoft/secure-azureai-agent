@@ -55,20 +55,30 @@ jobs:
 
     - name: Package backend (zip)
       run: |
-        cd backend
+        # App Serviceのビルドシステムが期待する構造でパッケージング
+        mkdir -p deploy-package/backend
+        cp -r backend/* deploy-package/backend/
+        cp backend/requirements.txt deploy-package/
+        cd deploy-package
         zip -r ../backend-package.zip . \
           -x "*.git*" "*__pycache__*" "*.pyc" "*.pyo" "*.pyd" \
           ".env" "*.pytest_cache*" "*.DS_Store"
         cd ..
+        rm -rf deploy-package
         ls -lh backend-package.zip
 
     - name: Package frontend (zip)
       run: |
-        cd frontend
+        # App Serviceのビルドシステムが期待する構造でパッケージング
+        mkdir -p deploy-package/frontend
+        cp -r frontend/* deploy-package/frontend/
+        cp frontend/requirements.txt deploy-package/
+        cd deploy-package
         zip -r ../frontend-package.zip . \
           -x "*.git*" "*__pycache__*" "*.pyc" "*.pyo" "*.pyd" \
           ".env" "*.pytest_cache*" "*.DS_Store"
         cd ..
+        rm -rf deploy-package
         ls -lh frontend-package.zip
 
     - name: Upload backend artifact
@@ -141,13 +151,13 @@ jobs:
         az webapp config set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --startup-file 'gunicorn --bind 0.0.0.0:$PORT src.main:app -k uvicorn.workers.UvicornWorker'
+          --startup-file 'cd backend && gunicorn --bind 0.0.0.0:${PORT:-8000} src.main:app -k uvicorn.workers.UvicornWorker'
 
-        echo "Configure app settings (use run-from-package)"
+        echo "Configure app settings (enable build)"
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false WEBSITE_RUN_FROM_PACKAGE=1
+          --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true WEBSITE_RUN_FROM_PACKAGE=0 PYTHONPATH=/home/site/wwwroot/backend
 
         echo "Deploying via az webapp deploy (recommended approach)"
         ZIP=backend-package.zip
@@ -180,12 +190,43 @@ jobs:
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --query '[0]' || true
 
+    - name: Verify Backend Deployment
+      run: |
+        echo "Checking deployment logs..."
+        az webapp log deployment show \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --query '[0]' || true
+
+        echo "Checking app health..."
+        sleep 10
+        HEALTH_URL="https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net"
+        HTTP_CODE=$(curl -f -s -o /dev/null -w "%{http_code}" $HEALTH_URL || echo "000")
+        echo "HTTP response code: $HTTP_CODE"
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "Health check failed with code: $HTTP_CODE"
+        fi
+
+        echo "Showing recent logs (last 50 lines)..."
+        az webapp log tail \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --lines 50 || true
+
     - name: Set Backend Environment Variables
       run: |
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --settings PORT=8000
+          --settings \
+            PORT=8000 \
+            PYTHONPATH=/home/site/wwwroot/backend \
+            PYTHONUNBUFFERED=1 \
+            ENVIRONMENT=production \
+            WEBSITE_PYTHON_VERSION=3.11 \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+            ENABLE_ORYX_BUILD=true \
+            WEBSITE_RUN_FROM_PACKAGE=0
         
         az webapp config set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
@@ -227,7 +268,7 @@ jobs:
         app-name: ${{ env.AZURE_WEBAPP_FRONTEND_NAME }}
         package: frontend-package.zip
         clean: true
-        startup-command: 'chainlit run app.py --host 0.0.0.0 --port $PORT'
+        startup-command: 'cd frontend && chainlit run app.py --host 0.0.0.0 --port ${PORT:-8000}'
 
     - name: Retry on Conflict (Frontend)
       if: failure()
@@ -246,7 +287,15 @@ jobs:
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --settings BACKEND_API_URL="${{ steps.backend-url.outputs.BACKEND_URL }}" PORT=8000
+          --settings \
+            BACKEND_API_URL="${{ steps.backend-url.outputs.BACKEND_URL }}" \
+            PORT=8000 \
+            PYTHONPATH=/home/site/wwwroot/frontend \
+            PYTHONUNBUFFERED=1 \
+            WEBSITE_PYTHON_VERSION=3.11 \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+            ENABLE_ORYX_BUILD=true \
+            WEBSITE_RUN_FROM_PACKAGE=0
         
         az webapp config set \
           --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \

@@ -26,7 +26,7 @@ echo "📱 バックエンドApp Service設定中..."
 az webapp config set \
   --resource-group $RESOURCE_GROUP \
   --name $BACKEND_APP \
-  --startup-file "gunicorn --bind 0.0.0.0:8000 src.main:app -k uvicorn.workers.UvicornWorker"
+  --startup-file "cd backend && gunicorn --bind 0.0.0.0:\$PORT src.main:app -k uvicorn.workers.UvicornWorker"
 
 # バックエンドApp Serviceの環境変数設定
 echo "⚙️ バックエンド環境変数設定中..."
@@ -37,15 +37,17 @@ az webapp config appsettings set \
     AZURE_OPENAI_ENDPOINT="$AZURE_OPENAI_ENDPOINT" \
     FRONTEND_URL="https://$FRONTEND_APP.azurewebsites.net" \
     ENVIRONMENT="production" \
-    PYTHONPATH="/home/site/wwwroot" \
-    PYTHONUNBUFFERED="1"
+    PYTHONPATH="/home/site/wwwroot/backend" \
+    PYTHONUNBUFFERED="1" \
+    SCM_DO_BUILD_DURING_DEPLOYMENT="true" \
+    WEBSITE_RUN_FROM_PACKAGE="0"
 
 # フロントエンドApp Serviceの設定
 echo "🎨 フロントエンドApp Service設定中..."
 az webapp config set \
   --resource-group $RESOURCE_GROUP \
   --name $FRONTEND_APP \
-  --startup-file "chainlit run app.py --host 0.0.0.0 --port 8000"
+  --startup-file "cd frontend && chainlit run app.py --host 0.0.0.0 --port \$PORT"
 
 # フロントエンドApp Serviceの環境変数設定
 echo "⚙️ フロントエンド環境変数設定中..."
@@ -54,7 +56,10 @@ az webapp config appsettings set \
   --name $FRONTEND_APP \
   --settings \
     BACKEND_API_URL="https://$BACKEND_APP.azurewebsites.net" \
-    PYTHONUNBUFFERED="1"
+    PYTHONUNBUFFERED="1" \
+    PYTHONPATH="/home/site/wwwroot/frontend" \
+    SCM_DO_BUILD_DURING_DEPLOYMENT="true" \
+    WEBSITE_RUN_FROM_PACKAGE="0"
 
 # CORS設定の確認・更新
 echo "🌐 CORS設定更新中..."

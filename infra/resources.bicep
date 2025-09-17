@@ -118,7 +118,7 @@ resource backendAppService 'Microsoft.Web/sites@2024-11-01' = {
     httpsOnly: true
     siteConfig: {
       linuxFxVersion: 'PYTHON|3.11'
-      appCommandLine: 'gunicorn --bind 0.0.0.0:$PORT src.main:app -k uvicorn.workers.UvicornWorker'
+      appCommandLine: 'cd backend && gunicorn --bind 0.0.0.0:$PORT src.main:app -k uvicorn.workers.UvicornWorker'
       alwaysOn: true
       cors: {
         allowedOrigins: [
@@ -209,7 +209,7 @@ resource frontendAppService 'Microsoft.Web/sites@2024-11-01' = {
     httpsOnly: true
     siteConfig: {
       linuxFxVersion: 'PYTHON|3.11'
-      appCommandLine: 'chainlit run app.py --host 0.0.0.0 --port $PORT'
+      appCommandLine: 'cd frontend && chainlit run app.py --host 0.0.0.0 --port $PORT'
       alwaysOn: true
       cors: {
         allowedOrigins: ['*']

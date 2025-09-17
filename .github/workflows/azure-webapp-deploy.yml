@@ -191,6 +191,12 @@ jobs:
           echo "No deployment history found or unable to check status"
         fi
         
+        echo "Removing WEBSITE_RUN_FROM_PACKAGE setting to allow deployment..."
+        az webapp config appsettings delete \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --setting-names WEBSITE_RUN_FROM_PACKAGE || true
+        
         echo "Stopping the app service to ensure clean state..."
         az webapp stop \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
@@ -220,18 +226,33 @@ jobs:
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false WEBSITE_RUN_FROM_PACKAGE=1 PYTHONPATH=/home/site/wwwroot
+          --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true PYTHONPATH=/home/site/wwwroot
 
-        echo "Deploying via az webapp deployment source config-zip"
+        echo "Deploying via az webapp deploy (recommended approach)"
         ZIP=backend-package.zip
         MAX=3
         DELAY=30
         for i in $(seq 1 $MAX); do
-          echo "Deploy attempt $i/$MAX using config-zip";
-          if timeout 600 az webapp deployment source config-zip \
+          echo "Deploy attempt $i/$MAX using az webapp deploy";
+          
+          # 前のデプロイメントが完了するまで待機
+          if [ $i -gt 1 ]; then
+            echo "Checking deployment status before retry..."
+            DEPLOY_STATUS=$(az webapp show \
+              --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --query "state" -o tsv)
+            echo "App state: $DEPLOY_STATUS"
+          fi
+          
+          if az webapp deploy \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-            --src "$ZIP"; then
+            --src-path "$ZIP" \
+            --type zip \
+            --restart true \
+            --clean true \
+            --timeout 600; then
               echo "Deploy succeeded"; SUCCESS=1; break; fi
           echo "Deploy failed. Sleeping $DELAY s"; sleep $DELAY; DELAY=$((DELAY+30));
         done
@@ -279,7 +300,6 @@ jobs:
 
     - name: Set Backend Environment Variables
       run: |
-        echo "Setting all environment variables before deployment..."
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
@@ -289,9 +309,8 @@ jobs:
             PYTHONUNBUFFERED=1 \
             ENVIRONMENT=production \
             WEBSITE_PYTHON_VERSION=3.11 \
-            SCM_DO_BUILD_DURING_DEPLOYMENT=false \
-            ENABLE_ORYX_BUILD=false \
-            WEBSITE_RUN_FROM_PACKAGE=1 \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+            ENABLE_ORYX_BUILD=true \
             WEBSITES_ENABLE_APP_SERVICE_STORAGE=false \
             WEBSITE_HTTPLOGGING_RETENTION_DAYS=1 \
             WEBSITE_TIME_ZONE="UTC"
@@ -341,14 +360,23 @@ jobs:
     - name: Retry on Conflict (Frontend)
       if: failure()
       run: |
-        echo "Initial frontend deploy failed, attempting serialized retry (possible 409)." 
-        for i in 1 2 3; do
-          echo "Retry attempt $i";
-          az webapp deployment source config-zip \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
-            --src frontend-package.zip && break || sleep 10;
-        done
+        echo "Primary deployment failed, trying alternative approach..."
+        
+        # WEBSITE_RUN_FROM_PACKAGEを削除
+        az webapp config appsettings delete \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --setting-names WEBSITE_RUN_FROM_PACKAGE || true
+        
+        # az webapp deployを使用
+        az webapp deploy \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --src-path "frontend-package.zip" \
+          --type zip \
+          --restart true \
+          --clean true \
+          --timeout 600
 
     - name: Set Frontend Environment Variables
       run: |
@@ -361,9 +389,8 @@ jobs:
             PYTHONPATH=/home/site/wwwroot/frontend \
             PYTHONUNBUFFERED=1 \
             WEBSITE_PYTHON_VERSION=3.11 \
-            SCM_DO_BUILD_DURING_DEPLOYMENT=false \
-            ENABLE_ORYX_BUILD=false \
-            WEBSITE_RUN_FROM_PACKAGE=1 \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+            ENABLE_ORYX_BUILD=true \
             WEBSITES_ENABLE_APP_SERVICE_STORAGE=false
         
         az webapp config set \

@@ -69,49 +69,29 @@ jobs:
 
     - name: Package backend (zip)
       run: |
-        # 軽量なパッケージを作成
-        echo "Creating optimized backend package..."
+        echo "Creating backend package..."
+        rm -rf deploy-package backend-package.zip
         mkdir -p deploy-package
         
-        # 必要なファイルのみコピー（最適化版を優先）
+        # Copy necessary files
         cp -r backend/src deploy-package/
-        if [ -f backend/requirements-optimized.txt ]; then
-          echo "Using optimized requirements for deployment..."
-          cp backend/requirements-optimized.txt deploy-package/requirements.txt
-        else
-          echo "Using standard requirements for deployment..."
-          cp backend/requirements.txt deploy-package/
-        fi
-        cp backend/Dockerfile deploy-package/ 2>/dev/null || true
+        cp backend/requirements.txt deploy-package/
         
-        # スタートアップスクリプトを作成
+        # Create startup script
         cat > deploy-package/startup.sh << 'EOF'
         #!/bin/bash
-        echo "Starting backend application..."
         cd /home/site/wwwroot
-        if [ -f requirements.txt ]; then
-          echo "Installing requirements..."
-          pip install -r requirements.txt --no-cache-dir
-        fi
-        echo "Launching gunicorn..."
+        echo "Installing dependencies..."
+        pip install -r requirements.txt --no-cache-dir
+        echo "Starting application..."
         gunicorn --bind 0.0.0.0:${PORT:-8000} src.main:app -k uvicorn.workers.UvicornWorker --timeout 120
         EOF
         chmod +x deploy-package/startup.sh
         
-        cd deploy-package
-        zip -r ../backend-package.zip . \
-          -x "*.git*" "*__pycache__*" "*.pyc" "*.pyo" "*.pyd" \
-          ".env" "*.pytest_cache*" "*.DS_Store" "*.log" "*.tmp"
-        cd ..
+        # Create ZIP
+        cd deploy-package && zip -r ../backend-package.zip . && cd ..
         rm -rf deploy-package
-        
-        echo "Package created successfully"
         ls -lh backend-package.zip
-        PACKAGE_SIZE=$(stat -c%s backend-package.zip)
-        echo "Package size in bytes: $PACKAGE_SIZE"
-        if [[ $PACKAGE_SIZE -gt 524288000 ]]; then
-          echo "WARNING: Package size exceeds 500MB, deployment may timeout"
-        fi
 
     - name: Package frontend (zip)
       run: |
@@ -231,43 +211,44 @@ jobs:
         
         sleep 10
 
-    - name: Backend Deploy (config-zip with retry)
+    - name: Backend Deploy (improved)
       run: |
         set -euo pipefail
         
-        # Start the app service
-        echo "Starting the app service..."
+        # App Service の起動
+        echo "Starting App Service..."
         az webapp start \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
         
         sleep 15
         
-        echo "Setting startup command (pre-deploy)"
-        az webapp config set \
-          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --startup-file 'startup.sh'
-
-        echo "Configure optimized app settings for performance"
+        # 設定の最適化
+        echo "Configuring App Service settings..."
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --settings \
             SCM_DO_BUILD_DURING_DEPLOYMENT=true \
             PYTHONPATH=/home/site/wwwroot \
-            PIP_NO_CACHE_DIR=1 \
-            PIP_DISABLE_PIP_VERSION_CHECK=1 \
-            PYTHONUNBUFFERED=1 \
-            PYTHONDONTWRITEBYTECODE=1 \
-            SCM_BUILD_TIMEOUT=600
-
-        echo "Deploying via az webapp deploy (recommended approach)"
+            PORT=8000
+            
+        # スタートアップコマンド設定
+        echo "Setting startup command..."
+        az webapp config set \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --startup-file 'startup.sh'
+        
+        # デプロイ実行（リトライ付き）
+        echo "Deploying backend package..."
         ZIP=backend-package.zip
         MAX=3
         DELAY=30
+        SUCCESS=0
+        
         for i in $(seq 1 $MAX); do
-          echo "Deploy attempt $i/$MAX using az webapp deploy";
+          echo "Deploy attempt $i/$MAX"
           
           # 前のデプロイメントが完了するまで待機
           if [ $i -gt 1 ]; then
@@ -277,8 +258,11 @@ jobs:
               --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
               --query "state" -o tsv)
             echo "App state: $DEPLOY_STATUS"
+            sleep $DELAY
+            DELAY=$((DELAY+30))
           fi
           
+          # デプロイ実行
           if az webapp deploy \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
@@ -287,18 +271,25 @@ jobs:
             --restart true \
             --clean true \
             --timeout 600; then
-              echo "Deploy succeeded"; SUCCESS=1; break; fi
-          echo "Deploy failed. Sleeping $DELAY s"; sleep $DELAY; DELAY=$((DELAY+30));
+              echo "Deploy succeeded"
+              SUCCESS=1
+              break
+          fi
+          
+          echo "Deploy failed. Will retry after $DELAY seconds..."
         done
-        if [ "${SUCCESS:-0}" != "1" ]; then
-          echo "All deploy attempts failed" >&2; exit 1; fi
+        
+        if [ "$SUCCESS" != "1" ]; then
+          echo "All deploy attempts failed" >&2
+          exit 1
+        fi
 
-        echo "Syncing and waiting for app to initialize"
+        echo "Syncing and waiting for app to initialize..."
         az webapp restart \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
 
-        echo "Waiting for app startup (30s)"
+        echo "Waiting for app startup (30s)..."
         sleep 30
 
         echo "Show recent deployment status"

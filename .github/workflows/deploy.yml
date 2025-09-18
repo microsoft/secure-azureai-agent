@@ -130,15 +130,32 @@ jobs:
         
         # Pre-install dependencies to site-packages directory
         echo "Pre-installing dependencies..."
-        pip install -r backend/requirements.txt \
-          --target deploy-package/site-packages \
-          --no-cache-dir
+        if [ -f backend/requirements-optimized.txt ]; then
+          echo "Installing optimized dependencies..."
+          pip install -r backend/requirements-optimized.txt \
+            --target deploy-package/site-packages \
+            --no-cache-dir
+        else
+          echo "Installing standard dependencies..."
+          pip install -r backend/requirements.txt \
+            --target deploy-package/site-packages \
+            --no-cache-dir
+        fi
+
+        # Verify key packages are installed
+        echo "Verifying key packages installation..."
+        python -c "import sys; sys.path.insert(0, 'deploy-package/site-packages'); import uvicorn; print('✅ uvicorn installed')" || echo "❌ uvicorn missing"
+        python -c "import sys; sys.path.insert(0, 'deploy-package/site-packages'); import fastapi; print('✅ fastapi installed')" || echo "❌ fastapi missing"
+        python -c "import sys; sys.path.insert(0, 'deploy-package/site-packages'); import gunicorn; print('✅ gunicorn installed')" || echo "❌ gunicorn missing"
 
         # Create optimized startup script (no installation needed)
         echo '#!/bin/bash' > deploy-package/startup.sh
         echo 'cd /home/site/wwwroot' >> deploy-package/startup.sh
         echo 'export PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages"' >> deploy-package/startup.sh
+        echo 'export CRYPTOGRAPHY_DONT_BUILD_RUST=1' >> deploy-package/startup.sh
         echo 'echo "Starting application directly (no install needed)..."' >> deploy-package/startup.sh
+        echo 'echo "Python path: $PYTHONPATH"' >> deploy-package/startup.sh
+        echo 'python -c "import sys; print(\"Python sys.path:\", sys.path[:3])"' >> deploy-package/startup.sh
         echo 'python -m gunicorn --bind 0.0.0.0:${PORT:-8000} src.main:app -k uvicorn.workers.UvicornWorker --timeout 120 --workers 1' >> deploy-package/startup.sh
         chmod +x deploy-package/startup.sh
         
@@ -150,6 +167,8 @@ jobs:
         
         echo "Package created successfully:"
         ls -lh backend-package.zip
+        echo "Package contents:"
+        unzip -l backend-package.zip | head -20
 
     - name: Azure Login
       uses: azure/login@v1
@@ -250,6 +269,11 @@ jobs:
                 break
               elif [[ "$DEPLOYMENT_STATUS" == "Failed" ]]; then
                 echo "❌ Deployment failed!"
+                echo "Latest deployment logs:"
+                az webapp log deployment show \
+                  --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+                  --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+                  --deployment-id latest 2>/dev/null || echo "No deployment logs available"
                 exit 1
               else
                 echo "Deployment still in progress, waiting..."
@@ -278,7 +302,10 @@ jobs:
             WEBSITE_RUN_FROM_PACKAGE=1 \
             WEBSITES_ENABLE_APP_SERVICE_STORAGE=false \
             WEBSITE_HTTPLOGGING_RETENTION_DAYS=1 \
-            WEBSITE_TIME_ZONE="UTC"
+            WEBSITE_TIME_ZONE="UTC" \
+            PIP_INDEX_URL="https://pypi.org/simple/" \
+            PIP_TRUSTED_HOST="pypi.org" \
+            CRYPTOGRAPHY_DONT_BUILD_RUST=1
         
         az webapp config set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
@@ -293,35 +320,52 @@ jobs:
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --deployment-id latest 2>/dev/null || echo "No deployment logs available"
 
+        echo ""
+        echo "Checking app service startup logs..."
+        az webapp log download \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --log-file startup-logs.zip 2>/dev/null || echo "Unable to download startup logs"
+        
+        if [ -f startup-logs.zip ]; then
+          unzip -q startup-logs.zip
+          echo "Recent container logs:"
+          find LogFiles -name "*.log" -type f -exec tail -10 {} + 2>/dev/null | tail -50 || echo "No recent logs found"
+        fi
+
+        echo ""
         echo "Checking app health with extended retry..."
         HEALTH_URL="https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net/health"
+        ROOT_URL="https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net"
         
-        # 最大10回、各30秒間隔でヘルスチェック
-        for i in {1..10}; do
-          echo "Health check attempt $i/10..."
+        # 最大12回、各30秒間隔でヘルスチェック
+        for i in {1..12}; do
+          echo "Health check attempt $i/12..."
           HTTP_CODE=$(curl -f -s -o /dev/null -w "%{http_code}" --max-time 30 $HEALTH_URL || echo "000")
-          echo "HTTP response code: $HTTP_CODE"
+          echo "Health endpoint HTTP response code: $HTTP_CODE"
           
           if [ "$HTTP_CODE" == "200" ]; then
             echo "✅ Backend health check passed!"
             break
           elif [ "$HTTP_CODE" == "404" ]; then
-            echo "⚠️ Backend is running but health endpoint not found"
-            break
+            echo "⚠️ Health endpoint not found, checking root endpoint..."
+            ROOT_CODE=$(curl -f -s -o /dev/null -w "%{http_code}" --max-time 30 $ROOT_URL || echo "000")
+            echo "Root endpoint HTTP response code: $ROOT_CODE"
+            if [[ "$ROOT_CODE" =~ ^[23] ]]; then
+              echo "✅ Backend root endpoint is accessible!"
+              break
+            fi
           else
             echo "❌ Backend health check failed with code: $HTTP_CODE"
-            if [ $i -lt 10 ]; then
+            if [ $i -lt 12 ]; then
               echo "Waiting 30 seconds before retry..."
               sleep 30
+            else
+              echo "⚠️ Health check failed, but checking if service is partially working..."
+              curl -v $ROOT_URL || echo "Root endpoint also inaccessible"
             fi
           fi
         done
-
-        echo "Showing recent logs (last 100 lines)..."
-        az webapp log tail \
-          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --lines 100 2>/dev/null || echo "Unable to fetch application logs"
 
     - name: Backend Status Summary
       if: always()

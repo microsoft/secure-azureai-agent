@@ -1,13 +1,13 @@
-name: Azure App Service - Deploy to Production
+name: Deploy Backend to Azure
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend.yml'
 
 env:
   # ============================================
@@ -16,14 +16,13 @@ env:
   
   # 既存Azureリソースの設定 (az resource list で確認可能)
   AZURE_WEBAPP_BACKEND_NAME: 'redteaming-demo-back-swe-mkurahara'   # 🔧 変更必要: あなたのバックエンドApp Service名
-  AZURE_WEBAPP_FRONTEND_NAME: 'redteaming-demo-front-swe-mkurahara' # 🔧 変更必要: あなたのフロントエンドApp Service名
   AZURE_RESOURCE_GROUP: 'redteaming-demo-rg-swe-mkurahara'          # 🔧 変更必要: あなたのResource Group名
   
   # その他の設定
   PYTHON_VERSION: '3.11'                                           # Chainlitとの互換性のため3.11を使用
 
 jobs:
-  build-and-test:
+  build-and-deploy:
     runs-on: ubuntu-latest
     
     steps:
@@ -38,19 +37,6 @@ jobs:
     - name: Install backend dependencies (optimized)
       run: |
         cd backend
-        python -m pip install --upgrade pip
-        # 最適化されたrequirementsを使用
-        if [ -f requirements-optimized.txt ]; then
-          echo "Using optimized requirements..."
-          pip install -r requirements-optimized.txt --no-cache-dir
-        else
-          echo "Using standard requirements..."
-          pip install -r requirements.txt --no-cache-dir
-        fi
-
-    - name: Install frontend dependencies (optimized)
-      run: |
-        cd frontend
         python -m pip install --upgrade pip
         # 最適化されたrequirementsを使用
         if [ -f requirements-optimized.txt ]; then
@@ -82,16 +68,15 @@ jobs:
         pip install -r backend/requirements.txt \
           --target deploy-package/site-packages \
           --no-cache-dir
-        # --no-deps を削除して、すべての依存関係をインストール
 
         # Create optimized startup script (no installation needed)
         cat > deploy-package/startup.sh << 'EOF'
-        #!/bin/bash
-        cd /home/site/wwwroot
-        export PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages"
-        echo "Starting application directly (no install needed)..."
-        python -m gunicorn --bind 0.0.0.0:${PORT:-8000} src.main:app -k uvicorn.workers.UvicornWorker --timeout 120 --workers 1
-        EOF
+#!/bin/bash
+cd /home/site/wwwroot
+export PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages"
+echo "Starting application directly (no install needed)..."
+python -m gunicorn --bind 0.0.0.0:${PORT:-8000} src.main:app -k uvicorn.workers.UvicornWorker --timeout 120 --workers 1
+EOF
         chmod +x deploy-package/startup.sh
         
         # Create ZIP package
@@ -104,85 +89,6 @@ jobs:
         ls -lh backend-package.zip
         echo "Package contents:"
         unzip -l backend-package.zip | head -20
-
-    - name: Package frontend (zip)
-      run: |
-        # App Serviceのビルドシステムが期待する構造でパッケージング
-        mkdir -p deploy-package/frontend
-        cp -r frontend/* deploy-package/frontend/
-        # 最適化されたrequirementsを使用
-        if [ -f frontend/requirements-optimized.txt ]; then
-          echo "Using optimized requirements for frontend deployment..."
-          cp frontend/requirements-optimized.txt deploy-package/requirements.txt
-        else
-          echo "Using standard requirements for frontend deployment..."
-          cp frontend/requirements.txt deploy-package/
-        fi
-        cd deploy-package
-        zip -r ../frontend-package.zip . \
-          -x "*.git*" "*__pycache__*" "*.pyc" "*.pyo" "*.pyd" \
-          ".env" "*.pytest_cache*" "*.DS_Store"
-        cd ..
-        rm -rf deploy-package
-        ls -lh frontend-package.zip
-
-    - name: Upload backend artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: backend-app
-        path: backend-package.zip
-
-    - name: Upload frontend artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: frontend-app
-        path: frontend-package.zip
-
-  # インフラストラクチャのデプロイは既存リソースを使用するためスキップ
-  # deploy-infrastructure:
-  #   runs-on: ubuntu-latest
-  #   if: github.ref == 'refs/heads/main'
-  #   needs: build-and-test
-  #   
-  #   steps:
-  #   - name: Checkout code
-  #     uses: actions/checkout@v4
-  #
-  #   - name: Azure Login
-  #     uses: azure/login@v1
-  #     with:
-  #       creds: ${{ secrets.AZURE_CREDENTIALS }}
-  #
-  #   - name: Setup Azure CLI
-  #     uses: azure/CLI@v1
-  #     with:
-  #       azcliversion: latest
-  #
-  #   - name: Install Azure Developer CLI
-  #     run: |
-  #       curl -fsSL https://aka.ms/install-azd.sh | bash
-  #
-  #   - name: Deploy infrastructure with azd
-  #     run: |
-  #       azd auth login --client-id ${{ secrets.AZURE_CLIENT_ID }} --client-secret ${{ secrets.AZURE_CLIENT_SECRET }} --tenant-id ${{ secrets.AZURE_TENANT_ID }}
-  #       azd env new production --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --location "East US"
-  #       azd provision --no-prompt
-  #     env:
-  #       AZURE_ENV_NAME: production
-  #       AZURE_LOCATION: eastus
-  #       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-  deploy-backend:
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
-    
-    steps:
-    - name: Download backend artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: backend-app
-        path: ./
 
     - name: Azure Login
       uses: azure/login@v1
@@ -223,7 +129,7 @@ jobs:
         
         sleep 10
 
-    - name: Backend Deploy (no-build mode)
+    - name: Backend Deploy (no-build mode with extended timeout)
       run: |
         set -euo pipefail
         
@@ -254,7 +160,7 @@ jobs:
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --startup-file 'startup.sh'
         
-        # 高速デプロイ実行（ビルド不要）
+        # 高速デプロイ実行（ビルド不要、タイムアウト大幅延長）
         echo "Deploying prebuilt package..."
         az webapp deploy \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
@@ -262,10 +168,37 @@ jobs:
           --src-path "backend-package.zip" \
           --type zip \
           --restart true \
-          --timeout 300
+          --timeout 900 || {
+            echo "⚠️ Deployment command timed out, but deployment may still be in progress..."
+            echo "Checking deployment status in 30 seconds..."
+            sleep 30
+            
+            # デプロイメントステータスを確認
+            DEPLOYMENT_STATUS=""
+            for i in {1..10}; do
+              echo "Checking deployment status (attempt $i)..."
+              DEPLOYMENT_STATUS=$(az webapp log deployment list \
+                --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+                --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+                --query "[0].status" -o tsv 2>/dev/null || echo "Unknown")
+              
+              echo "Deployment status: $DEPLOYMENT_STATUS"
+              
+              if [[ "$DEPLOYMENT_STATUS" == "Success" ]]; then
+                echo "✅ Deployment completed successfully!"
+                break
+              elif [[ "$DEPLOYMENT_STATUS" == "Failed" ]]; then
+                echo "❌ Deployment failed!"
+                exit 1
+              else
+                echo "Deployment still in progress, waiting..."
+                sleep 30
+              fi
+            done
+          }
         
-        echo "Deployment completed. Waiting for app to start..."
-        sleep 30
+        echo "Deployment phase completed. Waiting for app to start..."
+        sleep 60
 
     - name: Verify Backend Deployment
       run: |
@@ -275,24 +208,35 @@ jobs:
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --deployment-id latest 2>/dev/null || echo "No deployment logs available"
 
-        echo "Checking app health..."
-        sleep 10
+        echo "Checking app health with extended retry..."
         HEALTH_URL="https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net/health"
-        HTTP_CODE=$(curl -f -s -o /dev/null -w "%{http_code}" $HEALTH_URL || echo "000")
-        echo "HTTP response code: $HTTP_CODE"
-        if [ "$HTTP_CODE" == "200" ]; then
-          echo "✅ Backend health check passed!"
-        elif [ "$HTTP_CODE" == "404" ]; then
-          echo "⚠️ Backend is running but health endpoint not found"
-        else
-          echo "❌ Backend health check failed with code: $HTTP_CODE"
-        fi
+        
+        # 最大10回、各30秒間隔でヘルスチェック
+        for i in {1..10}; do
+          echo "Health check attempt $i/10..."
+          HTTP_CODE=$(curl -f -s -o /dev/null -w "%{http_code}" --max-time 30 $HEALTH_URL || echo "000")
+          echo "HTTP response code: $HTTP_CODE"
+          
+          if [ "$HTTP_CODE" == "200" ]; then
+            echo "✅ Backend health check passed!"
+            break
+          elif [ "$HTTP_CODE" == "404" ]; then
+            echo "⚠️ Backend is running but health endpoint not found"
+            break
+          else
+            echo "❌ Backend health check failed with code: $HTTP_CODE"
+            if [ $i -lt 10 ]; then
+              echo "Waiting 30 seconds before retry..."
+              sleep 30
+            fi
+          fi
+        done
 
-        echo "Showing recent logs (last 50 lines)..."
+        echo "Showing recent logs (last 100 lines)..."
         az webapp log tail \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --lines 50 2>/dev/null || echo "Unable to fetch application logs"
+          --lines 100 2>/dev/null || echo "Unable to fetch application logs"
 
     - name: Set Backend Environment Variables
       run: |
@@ -318,81 +262,15 @@ jobs:
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --linux-fx-version "PYTHON|3.11"
 
-  deploy-frontend:
-    runs-on: ubuntu-latest
-    needs: [build-and-test, deploy-backend]
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
-    
-    steps:
-    - name: Download frontend artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: frontend-app
-        path: ./
-
-    - name: Unzip frontend artifact
+    - name: Backend Status Summary
+      if: always()
       run: |
-        rm -rf frontend || true
-        unzip -q frontend-package.zip -d frontend
-        ls -R1 frontend | head -50
-
-    - name: Azure Login
-      uses: azure/login@v1
-      with:
-        creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-    - name: Get Backend URL
-      id: backend-url
-      run: |
-        BACKEND_URL=$(az webapp show --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query defaultHostName -o tsv)
-        echo "BACKEND_URL=https://$BACKEND_URL" >> $GITHUB_OUTPUT
-
-    - name: Deploy to Azure App Service (Frontend)
-      uses: azure/webapps-deploy@v3
-      with:
-        app-name: ${{ env.AZURE_WEBAPP_FRONTEND_NAME }}
-        package: frontend-package.zip
-        clean: true
-        startup-command: 'cd frontend && chainlit run app.py --host 0.0.0.0 --port ${PORT:-8000}'
-
-    - name: Retry on Conflict (Frontend)
-      if: failure()
-      run: |
-        echo "Primary deployment failed, trying alternative approach..."
+        echo "=== Backend Deployment Summary ==="
+        az webapp show \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --query "{name:name, status:state, url:defaultHostName, location:location}" -o table
         
-        # WEBSITE_RUN_FROM_PACKAGEを削除
-        az webapp config.appsettings.delete \
-          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --setting-names WEBSITE_RUN_FROM_PACKAGE || true
-        
-        # az webapp deployを使用
-        az webapp deploy \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
-          --src-path "frontend-package.zip" \
-          --type zip \
-          --restart true \
-          --clean true \
-          --timeout 600
-
-    - name: Set Frontend Environment Variables
-      run: |
-        az webapp config appsettings set \
-          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --settings \
-            BACKEND_API_URL="${{ steps.backend-url.outputs.BACKEND_URL }}" \
-            PORT=8000 \
-            PYTHONPATH=/home/site/wwwroot/frontend \
-            PYTHONUNBUFFERED=1 \
-            WEBSITE_PYTHON_VERSION=3.11 \
-            SCM_DO_BUILD_DURING_DEPLOYMENT=true \
-            ENABLE_ORYX_BUILD=true \
-            WEBSITES_ENABLE_APP_SERVICE_STORAGE=false
-        
-        az webapp config set \
-          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --linux-fx-version "PYTHON|3.11" \
-          --web-sockets-enabled true
+        echo ""
+        echo "Backend URL: https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net"
+        echo "Health Check URL: https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net/health"

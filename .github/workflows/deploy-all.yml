@@ -1,0 +1,99 @@
+name: Deploy All Components to Azure
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_backend:
+        description: 'Deploy Backend'
+        required: true
+        default: true
+        type: boolean
+      deploy_frontend:
+        description: 'Deploy Frontend'
+        required: true
+        default: true
+        type: boolean
+      sequential:
+        description: 'Deploy sequentially (recommended)'
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  deploy-backend:
+    if: ${{ inputs.deploy_backend }}
+    uses: ./.github/workflows/deploy-backend.yml
+    secrets: inherit
+
+  deploy-frontend:
+    if: ${{ inputs.deploy_frontend }}
+    needs: deploy-backend
+    condition: ${{ !inputs.sequential || success() }}
+    uses: ./.github/workflows/deploy-frontend.yml
+    secrets: inherit
+
+  deploy-frontend-parallel:
+    if: ${{ inputs.deploy_frontend && !inputs.sequential }}
+    uses: ./.github/workflows/deploy-frontend.yml
+    secrets: inherit
+
+  deployment-summary:
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, deploy-frontend]
+    if: always()
+    
+    env:
+      AZURE_WEBAPP_BACKEND_NAME: 'redteaming-demo-back-swe-mkurahara'
+      AZURE_WEBAPP_FRONTEND_NAME: 'redteaming-demo-front-swe-mkurahara'
+      AZURE_RESOURCE_GROUP: 'redteaming-demo-rg-swe-mkurahara'
+    
+    steps:
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Deployment Summary
+      run: |
+        echo "=== Full Deployment Summary ==="
+        echo ""
+        
+        if [ "${{ inputs.deploy_backend }}" == "true" ]; then
+          echo "Backend Status:"
+          az webapp show \
+            --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "{name:name, status:state, url:defaultHostName}" -o table
+          echo "Backend URL: https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net"
+          echo "Health Check: https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net/health"
+          echo ""
+        fi
+        
+        if [ "${{ inputs.deploy_frontend }}" == "true" ]; then
+          echo "Frontend Status:"
+          az webapp show \
+            --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "{name:name, status:state, url:defaultHostName}" -o table
+          echo "Frontend URL: https://${{ env.AZURE_WEBAPP_FRONTEND_NAME }}.azurewebsites.net"
+          echo ""
+        fi
+        
+        echo "=== Job Results ==="
+        echo "Backend deployment: ${{ needs.deploy-backend.result }}"
+        echo "Frontend deployment: ${{ needs.deploy-frontend.result }}"
+        echo ""
+        
+        if [[ "${{ needs.deploy-backend.result }}" == "success" && "${{ needs.deploy-frontend.result }}" == "success" ]]; then
+          echo "🎉 All deployments completed successfully!"
+          echo ""
+          echo "Application is ready:"
+          echo "👉 Frontend: https://${{ env.AZURE_WEBAPP_FRONTEND_NAME }}.azurewebsites.net"
+          echo "🔧 Backend API: https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net"
+        elif [[ "${{ needs.deploy-backend.result }}" == "success" || "${{ needs.deploy-frontend.result }}" == "success" ]]; then
+          echo "⚠️ Partial deployment completed"
+          echo "Check individual job logs for details"
+        else
+          echo "❌ Deployment failed"
+          echo "Check individual job logs for troubleshooting"
+        fi

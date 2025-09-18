@@ -1,0 +1,251 @@
+name: Deploy Frontend to Azure
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+  workflow_run:
+    workflows: ["Deploy Backend to Azure"]
+    types:
+      - completed
+
+env:
+  # ============================================
+  # 🔧 ハンズオン設定: 以下を個人の環境に合わせて変更してください
+  # ============================================
+  
+  # 既存Azureリソースの設定 (az resource list で確認可能)
+  AZURE_WEBAPP_FRONTEND_NAME: 'redteaming-demo-front-swe-mkurahara' # 🔧 変更必要: あなたのフロントエンドApp Service名
+  AZURE_WEBAPP_BACKEND_NAME: 'redteaming-demo-back-swe-mkurahara'   # 🔧 変更必要: あなたのバックエンドApp Service名
+  AZURE_RESOURCE_GROUP: 'redteaming-demo-rg-swe-mkurahara'          # 🔧 変更必要: あなたのResource Group名
+  
+  # その他の設定
+  PYTHON_VERSION: '3.11'                                           # Chainlitとの互換性のため3.11を使用
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install frontend dependencies (optimized)
+      run: |
+        cd frontend
+        python -m pip install --upgrade pip
+        # 最適化されたrequirementsを使用
+        if [ -f requirements-optimized.txt ]; then
+          echo "Using optimized requirements..."
+          pip install -r requirements-optimized.txt --no-cache-dir
+        else
+          echo "Using standard requirements..."
+          pip install -r requirements.txt --no-cache-dir
+        fi
+
+    - name: Package frontend (zip)
+      run: |
+        # App Serviceのビルドシステムが期待する構造でパッケージング
+        mkdir -p deploy-package/frontend
+        cp -r frontend/* deploy-package/frontend/
+        # 最適化されたrequirementsを使用
+        if [ -f frontend/requirements-optimized.txt ]; then
+          echo "Using optimized requirements for frontend deployment..."
+          cp frontend/requirements-optimized.txt deploy-package/requirements.txt
+        else
+          echo "Using standard requirements for frontend deployment..."
+          cp frontend/requirements.txt deploy-package/
+        fi
+        cd deploy-package
+        zip -r ../frontend-package.zip . \
+          -x "*.git*" "*__pycache__*" "*.pyc" "*.pyo" "*.pyd" \
+          ".env" "*.pytest_cache*" "*.DS_Store"
+        cd ..
+        rm -rf deploy-package
+        ls -lh frontend-package.zip
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Get Backend URL
+      id: backend-url
+      run: |
+        BACKEND_URL=$(az webapp show \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --query defaultHostName -o tsv)
+        echo "BACKEND_URL=https://$BACKEND_URL" >> $GITHUB_OUTPUT
+        echo "Backend URL: https://$BACKEND_URL"
+
+    - name: Pre-deployment cleanup (Frontend)
+      run: |
+        echo "Preparing frontend deployment..."
+        
+        # WEBSITE_RUN_FROM_PACKAGEを削除して新しいデプロイを許可
+        az webapp config appsettings delete \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --setting-names WEBSITE_RUN_FROM_PACKAGE || true
+        
+        # App Serviceを一度停止して状態をリセット
+        echo "Stopping frontend app service..."
+        az webapp stop \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
+        
+        sleep 10
+        
+        # App Serviceを起動
+        echo "Starting frontend app service..."
+        az webapp start \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
+        
+        sleep 15
+
+    - name: Deploy Frontend (with extended timeout)
+      run: |
+        set -euo pipefail
+        
+        # 環境変数の設定（デプロイ前に設定）
+        echo "Setting environment variables..."
+        az webapp config appsettings set \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --settings \
+            BACKEND_API_URL="${{ steps.backend-url.outputs.BACKEND_URL }}" \
+            PORT=8000 \
+            PYTHONPATH=/home/site/wwwroot/frontend \
+            PYTHONUNBUFFERED=1 \
+            WEBSITE_PYTHON_VERSION=3.11 \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+            ENABLE_ORYX_BUILD=true \
+            WEBSITES_ENABLE_APP_SERVICE_STORAGE=false
+        
+        # スタートアップコマンドの設定
+        echo "Setting startup command..."
+        az webapp config set \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --startup-file 'cd frontend && chainlit run app.py --host 0.0.0.0 --port ${PORT:-8000}' \
+          --linux-fx-version "PYTHON|3.11" \
+          --web-sockets-enabled true
+        
+        # フロントエンドデプロイ実行（大幅にタイムアウトを延長）
+        echo "Deploying frontend package..."
+        az webapp deploy \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --src-path "frontend-package.zip" \
+          --type zip \
+          --restart true \
+          --timeout 1200 || {
+            echo "⚠️ Frontend deployment command timed out, but deployment may still be in progress..."
+            echo "Checking deployment status in 30 seconds..."
+            sleep 30
+            
+            # デプロイメントステータスを確認
+            DEPLOYMENT_STATUS=""
+            for i in {1..15}; do
+              echo "Checking frontend deployment status (attempt $i)..."
+              DEPLOYMENT_STATUS=$(az webapp log deployment list \
+                --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+                --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+                --query "[0].status" -o tsv 2>/dev/null || echo "Unknown")
+              
+              echo "Frontend deployment status: $DEPLOYMENT_STATUS"
+              
+              if [[ "$DEPLOYMENT_STATUS" == "Success" ]]; then
+                echo "✅ Frontend deployment completed successfully!"
+                break
+              elif [[ "$DEPLOYMENT_STATUS" == "Failed" ]]; then
+                echo "❌ Frontend deployment failed!"
+                echo "Trying alternative deployment method..."
+                
+                # フォールバック: Azure Web Apps Deploy アクションを使用
+                echo "Attempting deployment with alternative method..."
+                az webapp deploy \
+                  --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+                  --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+                  --src-path "frontend-package.zip" \
+                  --type zip \
+                  --restart true \
+                  --clean true \
+                  --timeout 600 || echo "Alternative deployment also timed out"
+                break
+              else
+                echo "Frontend deployment still in progress, waiting..."
+                sleep 40
+              fi
+            done
+          }
+        
+        echo "Frontend deployment phase completed. Waiting for app to start..."
+        sleep 90
+
+    - name: Verify Frontend Deployment
+      run: |
+        echo "Checking frontend deployment logs..."
+        az webapp log deployment show \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --deployment-id latest 2>/dev/null || echo "No frontend deployment logs available"
+
+        echo "Checking frontend app health with extended retry..."
+        FRONTEND_URL="https://${{ env.AZURE_WEBAPP_FRONTEND_NAME }}.azurewebsites.net"
+        
+        # 最大12回、各45秒間隔でヘルスチェック（フロントエンドは起動に時間がかかる）
+        for i in {1..12}; do
+          echo "Frontend health check attempt $i/12..."
+          HTTP_CODE=$(curl -f -s -o /dev/null -w "%{http_code}" --max-time 45 $FRONTEND_URL || echo "000")
+          echo "HTTP response code: $HTTP_CODE"
+          
+          if [ "$HTTP_CODE" == "200" ]; then
+            echo "✅ Frontend health check passed!"
+            break
+          elif [[ "$HTTP_CODE" =~ ^[23] ]]; then
+            echo "✅ Frontend is responding (HTTP $HTTP_CODE)!"
+            break
+          else
+            echo "❌ Frontend health check failed with code: $HTTP_CODE"
+            if [ $i -lt 12 ]; then
+              echo "Waiting 45 seconds before retry..."
+              sleep 45
+            fi
+          fi
+        done
+
+        echo "Showing recent frontend logs (last 100 lines)..."
+        az webapp log tail \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --lines 100 2>/dev/null || echo "Unable to fetch frontend application logs"
+
+    - name: Frontend Status Summary
+      if: always()
+      run: |
+        echo "=== Frontend Deployment Summary ==="
+        az webapp show \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --query "{name:name, status:state, url:defaultHostName, location:location}" -o table
+        
+        echo ""
+        echo "Frontend URL: https://${{ env.AZURE_WEBAPP_FRONTEND_NAME }}.azurewebsites.net"
+        echo "Backend API URL: ${{ steps.backend-url.outputs.BACKEND_URL }}"
+        
+        echo ""
+        echo "=== Deployment Complete ==="
+        echo "You can now access the application at the frontend URL above."

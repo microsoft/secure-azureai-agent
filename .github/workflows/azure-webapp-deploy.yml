@@ -211,7 +211,7 @@ jobs:
         
         sleep 10
 
-    - name: Backend Deploy (improved)
+    - name: Backend Deploy (improved with async)
       run: |
         set -euo pipefail
         
@@ -223,13 +223,15 @@ jobs:
         
         sleep 15
         
-        # 設定の最適化
-        echo "Configuring App Service settings..."
+        # ビルドを無効化して高速化
+        echo "Configuring App Service settings for faster deployment..."
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --settings \
-            SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+            WEBSITE_RUN_FROM_PACKAGE=1 \
+            SCM_BUILD_TIMEOUT=600 \
             PYTHONPATH=/home/site/wwwroot \
             PORT=8000
             
@@ -240,63 +242,76 @@ jobs:
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --startup-file 'startup.sh'
         
-        # デプロイ実行（リトライ付き）
-        echo "Deploying backend package..."
+        # デプロイ実行（非同期モード）
+        echo "Deploying backend package (async mode)..."
         ZIP=backend-package.zip
-        MAX=3
-        DELAY=30
-        SUCCESS=0
         
-        for i in $(seq 1 $MAX); do
-          echo "Deploy attempt $i/$MAX"
-          
-          # 前のデプロイメントが完了するまで待機
-          if [ $i -gt 1 ]; then
-            echo "Checking deployment status before retry..."
-            DEPLOY_STATUS=$(az webapp show \
-              --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-              --query "state" -o tsv)
-            echo "App state: $DEPLOY_STATUS"
-            sleep $DELAY
-            DELAY=$((DELAY+30))
-          fi
-          
-          # デプロイ実行
-          if az webapp deploy \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-            --src-path "$ZIP" \
-            --type zip \
-            --restart true \
-            --clean true \
-            --timeout 600; then
-              echo "Deploy succeeded"
-              SUCCESS=1
-              break
-          fi
-          
-          echo "Deploy failed. Will retry after $DELAY seconds..."
-        done
+        # 非同期デプロイを開始
+        echo "Starting async deployment..."
+        DEPLOYMENT_ID=$(az webapp deploy \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --src-path "$ZIP" \
+          --type zip \
+          --async true \
+          --clean true \
+          --restart false \
+          --query "id" -o tsv || echo "")
         
-        if [ "$SUCCESS" != "1" ]; then
-          echo "All deploy attempts failed" >&2
+        if [ -z "$DEPLOYMENT_ID" ]; then
+          echo "Failed to start deployment"
           exit 1
         fi
+        
+        echo "Deployment started with ID: $DEPLOYMENT_ID"
+        echo "Monitoring deployment status..."
+        
+        # デプロイメントの完了を監視
+        MAX_WAIT=900  # 15分
+        INTERVAL=30
+        ELAPSED=0
+        
+        while [ $ELAPSED -lt $MAX_WAIT ]; do
+          sleep $INTERVAL
+          ELAPSED=$((ELAPSED + INTERVAL))
+          
+          # デプロイメントステータスを確認
+          DEPLOY_STATUS=$(az webapp log deployment list \
+            --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "[0].{status:status,complete:complete,message:message}" -o json 2>/dev/null || echo "{}")
+          
+          if [ ! -z "$DEPLOY_STATUS" ] && [ "$DEPLOY_STATUS" != "{}" ]; then
+            COMPLETE=$(echo $DEPLOY_STATUS | jq -r '.complete // false')
+            STATUS=$(echo $DEPLOY_STATUS | jq -r '.status // "Unknown"')
+            MESSAGE=$(echo $DEPLOY_STATUS | jq -r '.message // ""')
+            
+            echo "[$ELAPSED s] Status: $STATUS, Complete: $COMPLETE"
+            [ ! -z "$MESSAGE" ] && echo "Message: $MESSAGE"
+            
+            if [ "$COMPLETE" == "true" ]; then
+              echo "Deployment completed successfully!"
+              break
+            fi
+          fi
+          
+          echo "Deployment still in progress... ($ELAPSED seconds elapsed)"
+        done
+        
+        # タイムアウトチェック
+        if [ $ELAPSED -ge $MAX_WAIT ]; then
+          echo "WARNING: Deployment monitoring timed out after $MAX_WAIT seconds"
+          echo "Deployment may still be in progress. Check Azure Portal for status."
+        fi
 
-        echo "Syncing and waiting for app to initialize..."
+        # App Service を再起動
+        echo "Restarting App Service..."
         az webapp restart \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
 
-        echo "Waiting for app startup (30s)..."
-        sleep 30
-
-        echo "Show recent deployment status"
-        az webapp log deployment list \
-          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --query '[0]' 2>/dev/null || echo "No deployment history available"
+        echo "Waiting for app to initialize (45s)..."
+        sleep 45
 
     - name: Verify Backend Deployment
       run: |
@@ -388,7 +403,7 @@ jobs:
         echo "Primary deployment failed, trying alternative approach..."
         
         # WEBSITE_RUN_FROM_PACKAGEを削除
-        az webapp config appsettings delete \
+        az webapp config.appsettings.delete \
           --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --setting-names WEBSITE_RUN_FROM_PACKAGE || true

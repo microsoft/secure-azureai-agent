@@ -138,22 +138,22 @@ jobs:
         
         # Create web.config for proper startup
         cat > web.config << 'EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<configuration>
-  <system.webServer>
-    <handlers>
-      <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>
-    </handlers>
-    <httpPlatform processPath="python" arguments="main.py" startupTimeLimit="120" requestTimeout="00:04:00">
-      <environmentVariables>
-        <environmentVariable name="CRYPTOGRAPHY_DONT_BUILD_RUST" value="1"/>
-        <environmentVariable name="PYOPENSSL_NO_VENDOR" value="1"/>
-        <environmentVariable name="PYTHONPATH" value="/home/site/wwwroot"/>
-      </environmentVariables>
-    </httpPlatform>
-  </system.webServer>
-</configuration>
-EOF
+        <?xml version="1.0" encoding="utf-8"?>
+        <configuration>
+          <system.webServer>
+            <handlers>
+              <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>
+            </handlers>
+            <httpPlatform processPath="python" arguments="main.py" startupTimeLimit="120" requestTimeout="00:04:00">
+              <environmentVariables>
+                <environmentVariable name="CRYPTOGRAPHY_DONT_BUILD_RUST" value="1"/>
+                <environmentVariable name="PYOPENSSL_NO_VENDOR" value="1"/>
+                <environmentVariable name="PYTHONPATH" value="/home/site/wwwroot"/>
+              </environmentVariables>
+            </httpPlatform>
+          </system.webServer>
+        </configuration>
+        EOF
         
         # List package contents for verification
         echo ""

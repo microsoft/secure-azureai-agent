@@ -94,81 +94,76 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python ${{ env.PYTHON_VERSION }}
+    - name: Set up Python Backend
       uses: actions/setup-python@v4
       with:
-        python-version: ${{ env.PYTHON_VERSION }}
+        python-version: '3.11'
 
-    - name: Install backend dependencies (optimized)
+    - name: Create Backend Package
       run: |
-        cd backend
-        python -m pip install --upgrade pip
-        # 最適化されたrequirementsを使用
-        if [ -f requirements-optimized.txt ]; then
-          echo "Using optimized requirements..."
-          pip install -r requirements-optimized.txt --no-cache-dir
-        else
-          echo "Using standard requirements..."
-          pip install -r requirements.txt --no-cache-dir
+        echo "Setting up backend deployment package..."
+        
+        # Ensure backend directory exists
+        if [ ! -d "backend" ]; then
+          echo "❌ Backend directory not found!"
+          exit 1
         fi
-
-    - name: Run backend tests
-      run: |
+        
         cd backend
-        # Add test commands here when tests are available
-        # python -m pytest tests/
-
-    - name: Package backend (zip - prebuilt)
-      run: |
-        echo "Creating prebuilt backend package..."
-        rm -rf deploy-package backend-package.zip
-        mkdir -p deploy-package
         
-        # Copy source code
-        echo "Copying source files..."
-        cp -r backend/src deploy-package/
+        # Create site-packages directory structure
+        mkdir -p site-packages
         
-        # Pre-install dependencies to site-packages directory
-        echo "Pre-installing dependencies..."
-        if [ -f backend/requirements-optimized.txt ]; then
-          echo "Installing optimized dependencies..."
-          pip install -r backend/requirements-optimized.txt \
-            --target deploy-package/site-packages \
-            --no-cache-dir
-        else
-          echo "Installing standard dependencies..."
-          pip install -r backend/requirements.txt \
-            --target deploy-package/site-packages \
-            --no-cache-dir
-        fi
-
-        # Verify key packages are installed
-        echo "Verifying key packages installation..."
-        python -c "import sys; sys.path.insert(0, 'deploy-package/site-packages'); import uvicorn; print('✅ uvicorn installed')" || echo "❌ uvicorn missing"
-        python -c "import sys; sys.path.insert(0, 'deploy-package/site-packages'); import fastapi; print('✅ fastapi installed')" || echo "❌ fastapi missing"
-        python -c "import sys; sys.path.insert(0, 'deploy-package/site-packages'); import gunicorn; print('✅ gunicorn installed')" || echo "❌ gunicorn missing"
-
-        # Create optimized startup script (no installation needed)
-        echo '#!/bin/bash' > deploy-package/startup.sh
-        echo 'cd /home/site/wwwroot' >> deploy-package/startup.sh
-        echo 'export PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages"' >> deploy-package/startup.sh
-        echo 'export CRYPTOGRAPHY_DONT_BUILD_RUST=1' >> deploy-package/startup.sh
-        echo 'echo "Starting application directly (no install needed)..."' >> deploy-package/startup.sh
-        echo 'echo "Python path: $PYTHONPATH"' >> deploy-package/startup.sh
-        echo 'python -c "import sys; print(\"Python sys.path:\", sys.path[:3])"' >> deploy-package/startup.sh
-        echo 'python -m gunicorn --bind 0.0.0.0:${PORT:-8000} src.main:app -k uvicorn.workers.UvicornWorker --timeout 120 --workers 1' >> deploy-package/startup.sh
-        chmod +x deploy-package/startup.sh
+        # Set environment variables for compatible package builds
+        export CRYPTOGRAPHY_DONT_BUILD_RUST=1
+        export PYOPENSSL_NO_VENDOR=1
+        export SETUPTOOLS_USE_DISTUTILS=stdlib
         
-        # Create ZIP package
-        cd deploy-package
-        zip -r ../backend-package.zip .
-        cd ..
-        rm -rf deploy-package
+        echo "Installing dependencies with GLIBC compatibility..."
+        python -m pip install --upgrade pip setuptools wheel
         
-        echo "Package created successfully:"
-        ls -lh backend-package.zip
+        # Install dependencies to site-packages with compatibility options
+        python -m pip install \
+          --target ./site-packages \
+          --upgrade \
+          --no-warn-script-location \
+          --no-build-isolation \
+          --prefer-binary \
+          --only-binary=cryptography,pyopenssl,cffi \
+          -r requirements.txt
+        
+        # Copy source code to root (not src subfolder)
+        echo "Copying application files..."
+        cp -r src/* ./
+        
+        # Create web.config for proper startup
+        cat > web.config << 'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <system.webServer>
+    <handlers>
+      <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>
+    </handlers>
+    <httpPlatform processPath="python" arguments="main.py" startupTimeLimit="120" requestTimeout="00:04:00">
+      <environmentVariables>
+        <environmentVariable name="CRYPTOGRAPHY_DONT_BUILD_RUST" value="1"/>
+        <environmentVariable name="PYOPENSSL_NO_VENDOR" value="1"/>
+        <environmentVariable name="PYTHONPATH" value="/home/site/wwwroot"/>
+      </environmentVariables>
+    </httpPlatform>
+  </system.webServer>
+</configuration>
+EOF
+        
+        # List package contents for verification
+        echo ""
         echo "Package contents:"
-        unzip -l backend-package.zip | head -20
+        ls -la
+        echo ""
+        echo "Site-packages summary:"
+        ls site-packages/ | head -20
+        
+        cd ..
 
     - name: Azure Login
       uses: azure/login@v1
@@ -179,35 +174,39 @@ jobs:
       run: |
         echo "Checking for ongoing deployments..."
         # デプロイメントステータスを確認（最新のデプロイメント情報を取得）
-        LATEST_DEPLOYMENT=$(az webapp log deployment list \
+        LATEST_DEPLOYMENT=$(az webapp deployment list \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --query "[0].{status:status, id:id}" -o json 2>/dev/null || echo "{}")
+          --resource-group redteaming-demo-rg-swe-mkurahara \
+          --query "[0].status" -o tsv 2>/dev/null || echo "None")
         
-        if [ ! -z "$LATEST_DEPLOYMENT" ] && [ "$LATEST_DEPLOYMENT" != "{}" ]; then
-          STATUS=$(echo $LATEST_DEPLOYMENT | jq -r '.status // "Unknown"' 2>/dev/null || echo "Unknown")
-          echo "Latest deployment status: $STATUS"
-          
-          if [[ "$STATUS" == "Building" || "$STATUS" == "InProgress" || "$STATUS" == "Deploying" ]]; then
-            echo "Found ongoing deployment, waiting..."
-            sleep 60
-          fi
-        else
-          echo "No deployment history found or unable to check status"
-        fi
+        echo "Latest deployment status: $LATEST_DEPLOYMENT"
         
-        echo "Removing WEBSITE_RUN_FROM_PACKAGE setting to allow deployment..."
-        az webapp config appsettings delete \
+        # App Service設定を最適化
+        echo "Configuring App Service settings for Python 3.11..."
+        az webapp config set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --setting-names WEBSITE_RUN_FROM_PACKAGE || true
+          --resource-group redteaming-demo-rg-swe-mkurahara \
+          --linux-fx-version "PYTHON|3.11" \
+          --startup-file "gunicorn --bind=0.0.0.0:8000 --timeout=120 --workers=2 main:app"
         
-        echo "Stopping the app service to ensure clean state..."
-        az webapp stop \
+        # 環境変数を設定（GLIBC互換性のため）
+        az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
-        
-        sleep 10
+          --resource-group redteaming-demo-rg-swe-mkurahara \
+          --settings \
+            CRYPTOGRAPHY_DONT_BUILD_RUST=1 \
+            PYOPENSSL_NO_VENDOR=1 \
+            PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages" \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+            WEBSITE_RUN_FROM_PACKAGE=1
+
+    - name: Deploy Backend to Azure App Service
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.AZURE_WEBAPP_BACKEND_NAME }}
+        publish-profile: ${{ secrets.AZURE_WEBAPP_BACKEND_PUBLISH_PROFILE }}
+        package: backend/
+        startup-command: 'gunicorn --bind=0.0.0.0:8000 --workers=2 main:app'
 
     - name: Backend Deploy (no-build mode with extended timeout)
       run: |
@@ -494,7 +493,16 @@ jobs:
       run: |
         set -euo pipefail
         
-        # 環境変数の設定（デプロイ前に設定）
+        # フロントエンドApp Service設定を最適化
+        echo "Configuring Frontend App Service for Python 3.11..."
+        az webapp config set \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --startup-file 'chainlit run app.py --host 0.0.0.0 --port ${PORT:-8000}' \
+          --linux-fx-version "PYTHON|3.11" \
+          --web-sockets-enabled true
+        
+        # 環境変数の設定（GLIBC互換性含む）
         echo "Setting environment variables..."
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
@@ -502,21 +510,12 @@ jobs:
           --settings \
             BACKEND_API_URL="${{ steps.backend-url.outputs.BACKEND_URL }}" \
             PORT=8000 \
-            PYTHONPATH=/home/site/wwwroot/frontend \
+            PYTHONPATH=/home/site/wwwroot \
             PYTHONUNBUFFERED=1 \
-            WEBSITE_PYTHON_VERSION=3.11 \
-            SCM_DO_BUILD_DURING_DEPLOYMENT=true \
-            ENABLE_ORYX_BUILD=true \
+            CRYPTOGRAPHY_DONT_BUILD_RUST=1 \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+            WEBSITE_RUN_FROM_PACKAGE=1 \
             WEBSITES_ENABLE_APP_SERVICE_STORAGE=false
-        
-        # スタートアップコマンドの設定
-        echo "Setting startup command..."
-        az webapp config set \
-          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --startup-file 'cd frontend && chainlit run app.py --host 0.0.0.0 --port ${PORT:-8000}' \
-          --linux-fx-version "PYTHON|3.11" \
-          --web-sockets-enabled true
         
         # フロントエンドデプロイ実行（大幅にタイムアウトを延長）
         echo "Deploying frontend package..."

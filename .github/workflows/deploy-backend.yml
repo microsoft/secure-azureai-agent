@@ -70,13 +70,11 @@ jobs:
           --no-cache-dir
 
         # Create optimized startup script (no installation needed)
-        cat > deploy-package/startup.sh << 'EOF'
-#!/bin/bash
-cd /home/site/wwwroot
-export PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages"
-echo "Starting application directly (no install needed)..."
-python -m gunicorn --bind 0.0.0.0:${PORT:-8000} src.main:app -k uvicorn.workers.UvicornWorker --timeout 120 --workers 1
-EOF
+        echo '#!/bin/bash' > deploy-package/startup.sh
+        echo 'cd /home/site/wwwroot' >> deploy-package/startup.sh
+        echo 'export PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages"' >> deploy-package/startup.sh
+        echo 'echo "Starting application directly (no install needed)..."' >> deploy-package/startup.sh
+        echo 'python -m gunicorn --bind 0.0.0.0:${PORT:-8000} src.main:app -k uvicorn.workers.UvicornWorker --timeout 120 --workers 1' >> deploy-package/startup.sh
         chmod +x deploy-package/startup.sh
         
         # Create ZIP package

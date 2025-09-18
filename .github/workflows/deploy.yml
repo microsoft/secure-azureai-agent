@@ -314,6 +314,16 @@ jobs:
 
     - name: Verify Backend Deployment
       run: |
+        echo "Getting actual backend hostname..."
+        BACKEND_HOSTNAME=$(az webapp show \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --query defaultHostName -o tsv)
+        
+        echo "Backend hostname: $BACKEND_HOSTNAME"
+        HEALTH_URL="https://$BACKEND_HOSTNAME/health"
+        ROOT_URL="https://$BACKEND_HOSTNAME"
+        
         echo "Checking deployment logs..."
         az webapp log deployment show \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
@@ -335,8 +345,6 @@ jobs:
 
         echo ""
         echo "Checking app health with extended retry..."
-        HEALTH_URL="https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net/health"
-        ROOT_URL="https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net"
         
         # 最大12回、各30秒間隔でヘルスチェック
         for i in {1..12}; do
@@ -361,8 +369,16 @@ jobs:
               echo "Waiting 30 seconds before retry..."
               sleep 30
             else
-              echo "⚠️ Health check failed, but checking if service is partially working..."
-              curl -v $ROOT_URL || echo "Root endpoint also inaccessible"
+              echo "⚠️ Health check failed, checking app service status..."
+              az webapp show \
+                --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+                --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+                --query "{state:state, lastModifiedTimeUtc:lastModifiedTimeUtc}" -o table
+              
+              echo "Fetching recent application logs..."
+              az webapp log tail \
+                --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+                --resource-group ${{ env.AZURE_RESOURCE_GROUP }} || echo "Unable to fetch logs"
             fi
           fi
         done
@@ -556,41 +572,61 @@ jobs:
 
     - name: Verify Frontend Deployment
       run: |
-        echo "Checking frontend deployment logs..."
+        echo "Getting actual frontend hostname..."
+        FRONTEND_HOSTNAME=$(az webapp show \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --query defaultHostName -o tsv)
+        
+        echo "Frontend hostname: $FRONTEND_HOSTNAME"
+        HEALTH_URL="https://$FRONTEND_HOSTNAME/health"
+        ROOT_URL="https://$FRONTEND_HOSTNAME"
+        
+        echo "Checking deployment logs..."
         az webapp log deployment show \
           --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --deployment-id latest 2>/dev/null || echo "No frontend deployment logs available"
+          --deployment-id latest 2>/dev/null || echo "No deployment logs available"
 
-        echo "Checking frontend app health with extended retry..."
-        FRONTEND_URL="https://${{ env.AZURE_WEBAPP_FRONTEND_NAME }}.azurewebsites.net"
+        echo ""
+        echo "Checking frontend health with extended retry..."
         
-        # 最大12回、各45秒間隔でヘルスチェック（フロントエンドは起動に時間がかかる）
-        for i in {1..12}; do
-          echo "Frontend health check attempt $i/12..."
-          HTTP_CODE=$(curl -f -s -o /dev/null -w "%{http_code}" --max-time 45 $FRONTEND_URL || echo "000")
-          echo "HTTP response code: $HTTP_CODE"
+        # 最大10回、各15秒間隔でヘルスチェック
+        for i in {1..10}; do
+          echo "Health check attempt $i/10..."
+          HTTP_CODE=$(curl -f -s -o /dev/null -w "%{http_code}" --max-time 30 $HEALTH_URL || echo "000")
+          echo "Health endpoint HTTP response code: $HTTP_CODE"
           
           if [ "$HTTP_CODE" == "200" ]; then
             echo "✅ Frontend health check passed!"
             break
-          elif [[ "$HTTP_CODE" =~ ^[23] ]]; then
-            echo "✅ Frontend is responding (HTTP $HTTP_CODE)!"
-            break
+          elif [ "$HTTP_CODE" == "404" ]; then
+            echo "⚠️ Health endpoint not found, checking root endpoint..."
+            ROOT_CODE=$(curl -f -s -o /dev/null -w "%{http_code}" --max-time 30 $ROOT_URL || echo "000")
+            echo "Root endpoint HTTP response code: $ROOT_CODE"
+            if [[ "$ROOT_CODE" =~ ^[23] ]]; then
+              echo "✅ Frontend root endpoint is accessible!"
+              break
+            fi
           else
             echo "❌ Frontend health check failed with code: $HTTP_CODE"
-            if [ $i -lt 12 ]; then
-              echo "Waiting 45 seconds before retry..."
-              sleep 45
+            if [ $i -lt 10 ]; then
+              echo "Waiting 15 seconds before retry..."
+              sleep 15
+            else
+              echo "⚠️ Health check failed, checking app service status..."
+              az webapp show \
+                --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+                --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+                --query "{state:state, lastModifiedTimeUtc:lastModifiedTimeUtc}" -o table
+              
+              echo "Fetching recent frontend logs..."
+              az webapp log tail \
+                --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+                --resource-group ${{ env.AZURE_RESOURCE_GROUP }} || echo "Unable to fetch logs"
             fi
           fi
         done
-
-        echo "Showing recent frontend logs (last 100 lines)..."
-        az webapp log tail \
-          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --lines 100 2>/dev/null || echo "Unable to fetch frontend application logs"
 
     - name: Frontend Status Summary
       if: always()

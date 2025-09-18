@@ -26,7 +26,7 @@ jobs:
     secrets: inherit
 
   deploy-frontend:
-    if: ${{ inputs.deploy_frontend && (inputs.sequential || success()) }}
+    if: ${{ inputs.deploy_frontend && inputs.sequential }}
     needs: deploy-backend
     uses: ./.github/workflows/deploy-frontend.yml
     secrets: inherit
@@ -38,7 +38,7 @@ jobs:
 
   deployment-summary:
     runs-on: ubuntu-latest
-    needs: [deploy-backend, deploy-frontend]
+    needs: [deploy-backend, deploy-frontend, deploy-frontend-parallel]
     if: always()
     
     env:
@@ -80,16 +80,23 @@ jobs:
         
         echo "=== Job Results ==="
         echo "Backend deployment: ${{ needs.deploy-backend.result }}"
-        echo "Frontend deployment: ${{ needs.deploy-frontend.result }}"
+        echo "Frontend deployment (sequential): ${{ needs.deploy-frontend.result }}"
+        echo "Frontend deployment (parallel): ${{ needs.deploy-frontend-parallel.result }}"
         echo ""
         
-        if [[ "${{ needs.deploy-backend.result }}" == "success" && "${{ needs.deploy-frontend.result }}" == "success" ]]; then
+        # Determine frontend result (either sequential or parallel job)
+        FRONTEND_RESULT="${{ needs.deploy-frontend.result }}"
+        if [ "$FRONTEND_RESULT" == "skipped" ]; then
+          FRONTEND_RESULT="${{ needs.deploy-frontend-parallel.result }}"
+        fi
+        
+        if [[ "${{ needs.deploy-backend.result }}" == "success" && "$FRONTEND_RESULT" == "success" ]]; then
           echo "🎉 All deployments completed successfully!"
           echo ""
           echo "Application is ready:"
           echo "👉 Frontend: https://${{ env.AZURE_WEBAPP_FRONTEND_NAME }}.azurewebsites.net"
           echo "🔧 Backend API: https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net"
-        elif [[ "${{ needs.deploy-backend.result }}" == "success" || "${{ needs.deploy-frontend.result }}" == "success" ]]; then
+        elif [[ "${{ needs.deploy-backend.result }}" == "success" || "$FRONTEND_RESULT" == "success" ]]; then
           echo "⚠️ Partial deployment completed"
           echo "Check individual job logs for details"
         else

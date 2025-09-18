@@ -26,9 +26,8 @@ jobs:
     secrets: inherit
 
   deploy-frontend:
-    if: ${{ inputs.deploy_frontend }}
+    if: ${{ inputs.deploy_frontend && (inputs.sequential || success()) }}
     needs: deploy-backend
-    condition: ${{ !inputs.sequential || success() }}
     uses: ./.github/workflows/deploy-frontend.yml
     secrets: inherit
 

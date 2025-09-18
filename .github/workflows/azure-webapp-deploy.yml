@@ -67,31 +67,43 @@ jobs:
         # Add test commands here when tests are available
         # python -m pytest tests/
 
-    - name: Package backend (zip)
+    - name: Package backend (zip - prebuilt)
       run: |
-        echo "Creating backend package..."
+        echo "Creating prebuilt backend package..."
         rm -rf deploy-package backend-package.zip
         mkdir -p deploy-package
         
-        # Copy necessary files
+        # Copy source code
+        echo "Copying source files..."
         cp -r backend/src deploy-package/
-        cp backend/requirements.txt deploy-package/
         
-        # Create startup script
+        # Pre-install dependencies to site-packages directory
+        echo "Pre-installing dependencies..."
+        pip install -r backend/requirements.txt \
+          --target deploy-package/site-packages \
+          --no-cache-dir
+        # --no-deps を削除して、すべての依存関係をインストール
+
+        # Create optimized startup script (no installation needed)
         cat > deploy-package/startup.sh << 'EOF'
         #!/bin/bash
         cd /home/site/wwwroot
-        echo "Installing dependencies..."
-        pip install -r requirements.txt --no-cache-dir
-        echo "Starting application..."
-        gunicorn --bind 0.0.0.0:${PORT:-8000} src.main:app -k uvicorn.workers.UvicornWorker --timeout 120
+        export PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages"
+        echo "Starting application directly (no install needed)..."
+        python -m gunicorn --bind 0.0.0.0:${PORT:-8000} src.main:app -k uvicorn.workers.UvicornWorker --timeout 120 --workers 1
         EOF
         chmod +x deploy-package/startup.sh
         
-        # Create ZIP
-        cd deploy-package && zip -r ../backend-package.zip . && cd ..
+        # Create ZIP package
+        cd deploy-package
+        zip -r ../backend-package.zip .
+        cd ..
         rm -rf deploy-package
+        
+        echo "Package created successfully:"
         ls -lh backend-package.zip
+        echo "Package contents:"
+        unzip -l backend-package.zip | head -20
 
     - name: Package frontend (zip)
       run: |
@@ -211,7 +223,7 @@ jobs:
         
         sleep 10
 
-    - name: Backend Deploy (improved with async)
+    - name: Backend Deploy (no-build mode)
       run: |
         set -euo pipefail
         
@@ -223,16 +235,16 @@ jobs:
         
         sleep 15
         
-        # ビルドを無効化して高速化
-        echo "Configuring App Service settings for faster deployment..."
+        # ビルドを完全に無効化（事前ビルド済みパッケージ使用）
+        echo "Configuring for prebuilt package deployment (no build needed)..."
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --settings \
             SCM_DO_BUILD_DURING_DEPLOYMENT=false \
             WEBSITE_RUN_FROM_PACKAGE=1 \
-            SCM_BUILD_TIMEOUT=600 \
-            PYTHONPATH=/home/site/wwwroot \
+            ENABLE_ORYX_BUILD=false \
+            PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages" \
             PORT=8000
             
         # スタートアップコマンド設定
@@ -242,76 +254,18 @@ jobs:
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --startup-file 'startup.sh'
         
-        # デプロイ実行（非同期モード）
-        echo "Deploying backend package (async mode)..."
-        ZIP=backend-package.zip
-        
-        # 非同期デプロイを開始
-        echo "Starting async deployment..."
-        DEPLOYMENT_ID=$(az webapp deploy \
+        # 高速デプロイ実行（ビルド不要）
+        echo "Deploying prebuilt package..."
+        az webapp deploy \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-          --src-path "$ZIP" \
+          --src-path "backend-package.zip" \
           --type zip \
-          --async true \
-          --clean true \
-          --restart false \
-          --query "id" -o tsv || echo "")
+          --restart true \
+          --timeout 300
         
-        if [ -z "$DEPLOYMENT_ID" ]; then
-          echo "Failed to start deployment"
-          exit 1
-        fi
-        
-        echo "Deployment started with ID: $DEPLOYMENT_ID"
-        echo "Monitoring deployment status..."
-        
-        # デプロイメントの完了を監視
-        MAX_WAIT=900  # 15分
-        INTERVAL=30
-        ELAPSED=0
-        
-        while [ $ELAPSED -lt $MAX_WAIT ]; do
-          sleep $INTERVAL
-          ELAPSED=$((ELAPSED + INTERVAL))
-          
-          # デプロイメントステータスを確認
-          DEPLOY_STATUS=$(az webapp log deployment list \
-            --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --query "[0].{status:status,complete:complete,message:message}" -o json 2>/dev/null || echo "{}")
-          
-          if [ ! -z "$DEPLOY_STATUS" ] && [ "$DEPLOY_STATUS" != "{}" ]; then
-            COMPLETE=$(echo $DEPLOY_STATUS | jq -r '.complete // false')
-            STATUS=$(echo $DEPLOY_STATUS | jq -r '.status // "Unknown"')
-            MESSAGE=$(echo $DEPLOY_STATUS | jq -r '.message // ""')
-            
-            echo "[$ELAPSED s] Status: $STATUS, Complete: $COMPLETE"
-            [ ! -z "$MESSAGE" ] && echo "Message: $MESSAGE"
-            
-            if [ "$COMPLETE" == "true" ]; then
-              echo "Deployment completed successfully!"
-              break
-            fi
-          fi
-          
-          echo "Deployment still in progress... ($ELAPSED seconds elapsed)"
-        done
-        
-        # タイムアウトチェック
-        if [ $ELAPSED -ge $MAX_WAIT ]; then
-          echo "WARNING: Deployment monitoring timed out after $MAX_WAIT seconds"
-          echo "Deployment may still be in progress. Check Azure Portal for status."
-        fi
-
-        # App Service を再起動
-        echo "Restarting App Service..."
-        az webapp restart \
-          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
-
-        echo "Waiting for app to initialize (45s)..."
-        sleep 45
+        echo "Deployment completed. Waiting for app to start..."
+        sleep 30
 
     - name: Verify Backend Deployment
       run: |
@@ -323,13 +277,15 @@ jobs:
 
         echo "Checking app health..."
         sleep 10
-        HEALTH_URL="https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net"
+        HEALTH_URL="https://${{ env.AZURE_WEBAPP_BACKEND_NAME }}.azurewebsites.net/health"
         HTTP_CODE=$(curl -f -s -o /dev/null -w "%{http_code}" $HEALTH_URL || echo "000")
         echo "HTTP response code: $HTTP_CODE"
-        if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "404" ]; then
-          echo "Health check failed with code: $HTTP_CODE"
+        if [ "$HTTP_CODE" == "200" ]; then
+          echo "✅ Backend health check passed!"
+        elif [ "$HTTP_CODE" == "404" ]; then
+          echo "⚠️ Backend is running but health endpoint not found"
         else
-          echo "App is responding (HTTP $HTTP_CODE)"
+          echo "❌ Backend health check failed with code: $HTTP_CODE"
         fi
 
         echo "Showing recent logs (last 50 lines)..."
@@ -340,17 +296,19 @@ jobs:
 
     - name: Set Backend Environment Variables
       run: |
+        # 環境変数設定（ビルド設定は無効のまま維持）
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --settings \
             PORT=8000 \
-            PYTHONPATH=/home/site/wwwroot \
+            PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages" \
             PYTHONUNBUFFERED=1 \
             ENVIRONMENT=production \
             WEBSITE_PYTHON_VERSION=3.11 \
-            SCM_DO_BUILD_DURING_DEPLOYMENT=true \
-            ENABLE_ORYX_BUILD=true \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+            ENABLE_ORYX_BUILD=false \
+            WEBSITE_RUN_FROM_PACKAGE=1 \
             WEBSITES_ENABLE_APP_SERVICE_STORAGE=false \
             WEBSITE_HTTPLOGGING_RETENTION_DAYS=1 \
             WEBSITE_TIME_ZONE="UTC"

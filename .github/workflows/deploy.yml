@@ -165,8 +165,9 @@ jobs:
         echo "Package contents for Azure Remote Build:"
         ls -la
         echo ""
-        echo "Site-packages summary:"
-        ls site-packages/ | head -20
+        echo "Files ready for remote build:"
+        echo "- Source code: $(find . -name "*.py" | wc -l) Python files"
+        echo "- Requirements: $(test -f requirements.txt && echo "✓ requirements.txt present" || echo "✗ requirements.txt missing")"
         echo ""
         echo "Total package size:"
         du -sh .

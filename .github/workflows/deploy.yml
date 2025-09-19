@@ -172,24 +172,10 @@ jobs:
           echo "from main import app" > app.py
         fi
         
-        # Create web.config for proper startup
-        cat > web.config << 'EOF'
-        <?xml version="1.0" encoding="utf-8"?>
-        <configuration>
-          <system.webServer>
-            <handlers>
-              <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>
-            </handlers>
-            <httpPlatform processPath="python" arguments="main.py" startupTimeLimit="120" requestTimeout="00:04:00">
-              <environmentVariables>
-                <environmentVariable name="CRYPTOGRAPHY_DONT_BUILD_RUST" value="1"/>
-                <environmentVariable name="PYOPENSSL_NO_VENDOR" value="1"/>
-                <environmentVariable name="PYTHONPATH" value="/home/site/wwwroot"/>
-              </environmentVariables>
-            </httpPlatform>
-          </system.webServer>
-        </configuration>
-        EOF
+        # Remove unnecessary files to reduce package size
+        find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+        find . -type f -name "*.pyc" -delete 2>/dev/null || true
+        find . -type f -name "*.pyo" -delete 2>/dev/null || true
         
         # List package contents for verification
         echo ""
@@ -198,6 +184,9 @@ jobs:
         echo ""
         echo "Site-packages summary:"
         ls site-packages/ | head -20
+        echo ""
+        echo "Total package size:"
+        du -sh .
         
         cd ..
 
@@ -239,95 +228,35 @@ jobs:
             DISABLE_ORYX_BUILD=true
 
     - name: Deploy Backend to Azure App Service
-      uses: azure/webapps-deploy@v2
+      uses: azure/webapps-deploy@v3
       with:
         app-name: ${{ env.AZURE_WEBAPP_BACKEND_NAME }}
         publish-profile: ${{ secrets.AZURE_WEBAPP_BACKEND_PUBLISH_PROFILE }}
         package: backend/
         startup-command: 'run.sh'
+        clean: true
+        restart: true
 
-    - name: Backend Deploy (no-build mode with extended timeout)
+    - name: Verify Backend Package Deployment
       run: |
-        set -euo pipefail
+        echo "Waiting for deployment to complete..."
+        sleep 30
         
-        # App Service の起動
-        echo "Starting App Service..."
-        az webapp start \
+        # Check deployment status
+        echo "Checking deployment status..."
+        az webapp deployment list \
+          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --query "[0].{status:status, startTime:startTime, endTime:endTime}" -o table
+        
+        # Restart the app to ensure new deployment is loaded
+        echo "Restarting app service..."
+        az webapp restart \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
         
-        sleep 15
-        
-        # ビルドを完全に無効化（事前ビルド済みパッケージ使用）
-        echo "Configuring for prebuilt package deployment (no build needed)..."
-        az webapp config appsettings set \
-          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --settings \
-            SCM_DO_BUILD_DURING_DEPLOYMENT=false \
-            WEBSITE_RUN_FROM_PACKAGE=0 \
-            ENABLE_ORYX_BUILD=false \
-            DISABLE_ORYX_BUILD=true \
-            PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages" \
-            PORT=8000
-            
-        # スタートアップコマンド設定
-        echo "Setting startup command..."
-        az webapp config set \
-          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --startup-file 'run.sh'
-        
-        # Create deployment package
-        echo "Creating deployment package..."
-        cd backend
-        zip -r ../backend-package.zip . -x "*.git*" "*__pycache__*" "*.pyc"
-        cd ..
-        
-        # 高速デプロイ実行（ビルド不要、タイムアウト大幅延長）
-        echo "Deploying prebuilt package..."
-        az webapp deploy \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-          --src-path "backend-package.zip" \
-          --type zip \
-          --restart true \
-          --timeout 900 || {
-            echo "⚠️ Deployment command timed out, but deployment may still be in progress..."
-            echo "Checking deployment status in 30 seconds..."
-            sleep 30
-            
-            # デプロイメントステータスを確認
-            DEPLOYMENT_STATUS=""
-            for i in {1..10}; do
-              echo "Checking deployment status (attempt $i)..."
-              DEPLOYMENT_STATUS=$(az webapp log deployment list \
-                --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-                --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-                --query "[0].status" -o tsv 2>/dev/null || echo "Unknown")
-              
-              echo "Deployment status: $DEPLOYMENT_STATUS"
-              
-              if [[ "$DEPLOYMENT_STATUS" == "Success" ]]; then
-                echo "✅ Deployment completed successfully!"
-                break
-              elif [[ "$DEPLOYMENT_STATUS" == "Failed" ]]; then
-                echo "❌ Deployment failed!"
-                echo "Latest deployment logs:"
-                az webapp log deployment show \
-                  --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-                  --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-                  --deployment-id latest 2>/dev/null || echo "No deployment logs available"
-                exit 1
-              else
-                echo "Deployment still in progress, waiting..."
-                sleep 30
-              fi
-            done
-          }
-        
-        echo "Deployment phase completed. Waiting for app to start..."
-        sleep 60
+        echo "Deployment completed. Waiting for app to start..."
+        sleep 45
 
     - name: Set Backend Environment Variables
       run: |
@@ -343,18 +272,10 @@ jobs:
             WEBSITE_PYTHON_VERSION=3.11 \
             SCM_DO_BUILD_DURING_DEPLOYMENT=false \
             ENABLE_ORYX_BUILD=false \
+            DISABLE_ORYX_BUILD=true \
             WEBSITE_RUN_FROM_PACKAGE=0 \
-            WEBSITES_ENABLE_APP_SERVICE_STORAGE=false \
-            WEBSITE_HTTPLOGGING_RETENTION_DAYS=1 \
-            WEBSITE_TIME_ZONE="UTC" \
-            PIP_INDEX_URL="https://pypi.org/simple/" \
-            PIP_TRUSTED_HOST="pypi.org" \
-            CRYPTOGRAPHY_DONT_BUILD_RUST=1
-        
-        az webapp config set \
-          --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --linux-fx-version "PYTHON|3.11"
+            CRYPTOGRAPHY_DONT_BUILD_RUST=1 \
+            PYOPENSSL_NO_VENDOR=1
 
     - name: Verify Backend Deployment
       run: |

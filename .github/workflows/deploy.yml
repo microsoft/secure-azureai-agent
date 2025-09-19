@@ -153,14 +153,14 @@ jobs:
         echo "Installing dependencies with GLIBC compatibility..."
         python -m pip install --upgrade pip setuptools wheel
         
-        # Install dependencies to site-packages with compatibility options
+        # Install dependencies to site-packages with GLIBC compatibility options
         python -m pip install \
           --target ./site-packages \
           --upgrade \
           --no-warn-script-location \
           --no-build-isolation \
           --prefer-binary \
-          --only-binary=cryptography,pyopenssl,cffi \
+          --no-binary=cryptography,pyopenssl,cffi \
           -r requirements.txt
         
         # Copy source code to root (not src subfolder)
@@ -447,7 +447,7 @@ jobs:
             --upgrade \
             --no-warn-script-location \
             --no-build-isolation \
-            --prefer-binary \
+            --prefer-binary --no-binary=cryptography,pyopenssl,cffi \
             -r requirements-optimized.txt
         else
           echo "Using standard requirements..."
@@ -456,7 +456,7 @@ jobs:
             --upgrade \
             --no-warn-script-location \
             --no-build-isolation \
-            --prefer-binary \
+            --prefer-binary --no-binary=cryptography,pyopenssl,cffi \
             -r requirements.txt
         fi
         
@@ -785,7 +785,7 @@ jobs:
             --upgrade \
             --no-warn-script-location \
             --no-build-isolation \
-            --prefer-binary \
+            --prefer-binary --no-binary=cryptography,pyopenssl,cffi \
             -r requirements-optimized.txt
         else
           echo "Using standard requirements..."
@@ -794,7 +794,7 @@ jobs:
             --upgrade \
             --no-warn-script-location \
             --no-build-isolation \
-            --prefer-binary \
+            --prefer-binary --no-binary=cryptography,pyopenssl,cffi \
             -r requirements.txt
         fi
         

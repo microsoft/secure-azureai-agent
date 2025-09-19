@@ -119,7 +119,7 @@ jobs:
         echo "Starting FastAPI backend application..."
         
         # Set Python path
-        export PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages:$PYTHONPATH"
+        export PYTHONPATH="/home/site/wwwroot:$PYTHONPATH"
         
         # Set port
         export PORT=${PORT:-8000}
@@ -142,39 +142,9 @@ jobs:
         
         chmod +x run.sh
         
-        # Create site-packages directory structure
-        mkdir -p site-packages
-        
-        # Set environment variables for maximum compatibility
-        export CRYPTOGRAPHY_DONT_BUILD_RUST=1
-        export PYOPENSSL_NO_VENDOR=1
-        export SETUPTOOLS_USE_DISTUTILS=stdlib
-        
-        echo "Installing dependencies with maximum GLIBC compatibility..."
-        python -m pip install --upgrade pip setuptools wheel
-        
-        # Use older, more compatible versions of cryptography stack
-        echo "Installing older, GLIBC-compatible versions of cryptography packages..."
-        python -m pip install \
-          --target ./site-packages \
-          --upgrade \
-          --no-warn-script-location \
-          --only-binary=:all: \
-          --prefer-binary \
-          "cryptography==3.4.8" \
-          "pyopenssl==21.0.0" \
-          "cffi==1.15.1" \
-          "pycparser==2.21"
-        
-        # Install remaining dependencies with binary preference  
-        echo "Installing remaining dependencies..."
-        python -m pip install \
-          --target ./site-packages \
-          --upgrade \
-          --no-warn-script-location \
-          --no-build-isolation \
-          --prefer-binary \
-          -r requirements.txt
+        # Azure Remote Build will handle all dependencies
+        echo "Preparing for Azure Remote Build deployment..."
+        echo "Azure will automatically install dependencies from requirements.txt during deployment."
         
         # Copy source code to root (not src subfolder)
         echo "Copying application files..."
@@ -192,7 +162,7 @@ jobs:
         
         # List package contents for verification
         echo ""
-        echo "Package contents:"
+        echo "Package contents for Azure Remote Build:"
         ls -la
         echo ""
         echo "Site-packages summary:"
@@ -227,20 +197,17 @@ jobs:
           --linux-fx-version "PYTHON|3.11" \
           --startup-file "run.sh"
         
-        # 環境変数を設定（GLIBC互換性のため）
+        # Azure Remote Build用の環境変数を設定
         az webapp config appsettings set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group redteaming-demo-rg-swe-mkurahara \
           --settings \
-            CRYPTOGRAPHY_DONT_BUILD_RUST=1 \
-            PYOPENSSL_NO_VENDOR=1 \
-            PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages" \
-            SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+            ENABLE_ORYX_BUILD=true \
             WEBSITE_RUN_FROM_PACKAGE=0 \
-            ENABLE_ORYX_BUILD=false \
-            DISABLE_ORYX_BUILD=true
+            PYTHONPATH="/home/site/wwwroot"
 
-    - name: Deploy Backend to Azure App Service
+    - name: Deploy Backend to Azure App Service (Remote Build)
       uses: azure/webapps-deploy@v3
       with:
         app-name: ${{ env.AZURE_WEBAPP_BACKEND_NAME }}

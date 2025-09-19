@@ -265,3 +265,26 @@ local.env
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Azure Remote Build - Exclude local build artifacts
+site-packages/
+lib/
+lib64/
+venv/
+env/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/

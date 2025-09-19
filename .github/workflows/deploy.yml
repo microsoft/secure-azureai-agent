@@ -145,24 +145,26 @@ jobs:
         # Create site-packages directory structure
         mkdir -p site-packages
         
-        # Set environment variables for compatible package builds
+        # Set environment variables for maximum compatibility
         export CRYPTOGRAPHY_DONT_BUILD_RUST=1
         export PYOPENSSL_NO_VENDOR=1
         export SETUPTOOLS_USE_DISTUTILS=stdlib
         
-        echo "Installing dependencies with GLIBC compatibility..."
+        echo "Installing dependencies with maximum GLIBC compatibility..."
         python -m pip install --upgrade pip setuptools wheel
         
-        # Install GLIBC-compatible versions of problematic packages first
-        echo "Installing GLIBC-compatible versions of cryptography packages..."
+        # Use older, more compatible versions of cryptography stack
+        echo "Installing older, GLIBC-compatible versions of cryptography packages..."
         python -m pip install \
           --target ./site-packages \
           --upgrade \
           --no-warn-script-location \
+          --only-binary=:all: \
           --prefer-binary \
-          "cryptography==42.0.5" \
-          "pyopenssl==24.1.0" \
-          "cffi==1.16.0"
+          "cryptography==3.4.8" \
+          "pyopenssl==21.0.0" \
+          "cffi==1.15.0" \
+          "pycparser==2.21"
         
         # Install remaining dependencies with binary preference  
         echo "Installing remaining dependencies..."
@@ -450,16 +452,18 @@ jobs:
         echo "Installing frontend dependencies..."
         python -m pip install --upgrade pip setuptools wheel
         
-        # Install GLIBC-compatible cryptography packages first (Sequential)
-        echo "Installing GLIBC-compatible versions of cryptography packages..."
+        # Install older, GLIBC-compatible cryptography packages first (Sequential)
+        echo "Installing older, GLIBC-compatible versions of cryptography packages..."
         python -m pip install \
           --target ./site-packages \
           --upgrade \
           --no-warn-script-location \
+          --only-binary=:all: \
           --prefer-binary \
-          "cryptography==42.0.5" \
-          "pyopenssl==24.1.0" \
-          "cffi==1.16.0"
+          "cryptography==3.4.8" \
+          "pyopenssl==21.0.0" \
+          "cffi==1.15.0" \
+          "pycparser==2.21"
 
         # Install dependencies to site-packages
         if [ -f requirements-optimized.txt ]; then
@@ -788,16 +792,18 @@ jobs:
         
         chmod +x startup.sh
         
-        # Install GLIBC-compatible cryptography packages first (Parallel)
-        echo "Installing GLIBC-compatible versions of cryptography packages..."
+        # Install older, GLIBC-compatible cryptography packages first (Parallel)
+        echo "Installing older, GLIBC-compatible versions of cryptography packages..."
         python -m pip install \
           --target ./site-packages \
           --upgrade \
           --no-warn-script-location \
+          --only-binary=:all: \
           --prefer-binary \
-          "cryptography==42.0.5" \
-          "pyopenssl==24.1.0" \
-          "cffi==1.16.0"
+          "cryptography==3.4.8" \
+          "pyopenssl==21.0.0" \
+          "cffi==1.15.0" \
+          "pycparser==2.21"
 
         # Create site-packages directory structure
         mkdir -p site-packages

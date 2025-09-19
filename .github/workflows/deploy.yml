@@ -111,6 +111,29 @@ jobs:
         
         cd backend
         
+        # Create startup.sh script
+        cat > startup.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        echo "Starting FastAPI backend application..."
+        
+        # Set Python path
+        export PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages:$PYTHONPATH"
+        
+        # Set port
+        export PORT=${PORT:-8000}
+        
+        # Change to app directory
+        cd /home/site/wwwroot
+        
+        # Start Gunicorn with Uvicorn workers for FastAPI
+        echo "Starting Gunicorn with Uvicorn workers on port $PORT..."
+        gunicorn main:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120 --access-logfile=- --error-logfile=-
+        EOF
+        
+        chmod +x startup.sh
+        
         # Create site-packages directory structure
         mkdir -p site-packages
         
@@ -135,6 +158,11 @@ jobs:
         # Copy source code to root (not src subfolder)
         echo "Copying application files..."
         cp -r src/* ./
+        
+        # Create simple app.py wrapper if main.py exists
+        if [ -f main.py ]; then
+          echo "from main import app" > app.py
+        fi
         
         # Create web.config for proper startup
         cat > web.config << 'EOF'
@@ -187,7 +215,7 @@ jobs:
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group redteaming-demo-rg-swe-mkurahara \
           --linux-fx-version "PYTHON|3.11" \
-          --startup-file "gunicorn --bind=0.0.0.0:8000 --timeout=120 --workers=2 main:app"
+          --startup-file "/home/site/wwwroot/startup.sh"
         
         # 環境変数を設定（GLIBC互換性のため）
         az webapp config appsettings set \
@@ -198,7 +226,8 @@ jobs:
             PYOPENSSL_NO_VENDOR=1 \
             PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages" \
             SCM_DO_BUILD_DURING_DEPLOYMENT=false \
-            WEBSITE_RUN_FROM_PACKAGE=1
+            WEBSITE_RUN_FROM_PACKAGE=0 \
+            ENABLE_ORYX_BUILD=false
 
     - name: Deploy Backend to Azure App Service
       uses: azure/webapps-deploy@v2
@@ -206,7 +235,7 @@ jobs:
         app-name: ${{ env.AZURE_WEBAPP_BACKEND_NAME }}
         publish-profile: ${{ secrets.AZURE_WEBAPP_BACKEND_PUBLISH_PROFILE }}
         package: backend/
-        startup-command: 'gunicorn --bind=0.0.0.0:8000 --workers=2 main:app'
+        startup-command: '/home/site/wwwroot/startup.sh'
 
     - name: Backend Deploy (no-build mode with extended timeout)
       run: |
@@ -227,7 +256,7 @@ jobs:
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --settings \
             SCM_DO_BUILD_DURING_DEPLOYMENT=false \
-            WEBSITE_RUN_FROM_PACKAGE=1 \
+            WEBSITE_RUN_FROM_PACKAGE=0 \
             ENABLE_ORYX_BUILD=false \
             PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages" \
             PORT=8000
@@ -237,7 +266,13 @@ jobs:
         az webapp config set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --startup-file 'startup.sh'
+          --startup-file '/home/site/wwwroot/startup.sh'
+        
+        # Create deployment package
+        echo "Creating deployment package..."
+        cd backend
+        zip -r ../backend-package.zip . -x "*.git*" "*__pycache__*" "*.pyc"
+        cd ..
         
         # 高速デプロイ実行（ビルド不要、タイムアウト大幅延長）
         echo "Deploying prebuilt package..."
@@ -298,7 +333,7 @@ jobs:
             WEBSITE_PYTHON_VERSION=3.11 \
             SCM_DO_BUILD_DURING_DEPLOYMENT=false \
             ENABLE_ORYX_BUILD=false \
-            WEBSITE_RUN_FROM_PACKAGE=1 \
+            WEBSITE_RUN_FROM_PACKAGE=0 \
             WEBSITES_ENABLE_APP_SERVICE_STORAGE=false \
             WEBSITE_HTTPLOGGING_RETENTION_DAYS=1 \
             WEBSITE_TIME_ZONE="UTC" \
@@ -424,23 +459,101 @@ jobs:
 
     - name: Package frontend (zip)
       run: |
-        # App Serviceのビルドシステムが期待する構造でパッケージング
-        mkdir -p deploy-package/frontend
-        cp -r frontend/* deploy-package/frontend/
-        # 最適化されたrequirementsを使用
-        if [ -f frontend/requirements-optimized.txt ]; then
-          echo "Using optimized requirements for frontend deployment..."
-          cp frontend/requirements-optimized.txt deploy-package/requirements.txt
-        else
-          echo "Using standard requirements for frontend deployment..."
-          cp frontend/requirements.txt deploy-package/
+        echo "Creating frontend deployment package..."
+        
+        # Ensure frontend directory exists
+        if [ ! -d "frontend" ]; then
+          echo "❌ Frontend directory not found!"
+          exit 1
         fi
-        cd deploy-package
-        zip -r ../frontend-package.zip . \
+        
+        cd frontend
+        
+        # Create startup.sh script for frontend
+        cat > startup.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        echo "Starting Chainlit frontend application..."
+        
+        # Set Python path
+        export PYTHONPATH="/home/site/wwwroot/frontend:/home/site/wwwroot/frontend/site-packages:$PYTHONPATH"
+        
+        # Set port
+        export PORT=${PORT:-8000}
+        
+        # Change to frontend directory
+        cd /home/site/wwwroot/frontend
+        
+        # Install chainlit if not present (fallback)
+        if ! command -v chainlit &> /dev/null; then
+          echo "Chainlit not found in PATH, using Python module..."
+          python -m chainlit run app.py --host 0.0.0.0 --port $PORT
+        else
+          echo "Starting Chainlit on port $PORT..."
+          chainlit run app.py --host 0.0.0.0 --port $PORT
+        fi
+        EOF
+        
+        chmod +x startup.sh
+        
+        # Create site-packages directory structure
+        mkdir -p site-packages
+        
+        # Set environment variables for compatible package builds
+        export CRYPTOGRAPHY_DONT_BUILD_RUST=1
+        export PYOPENSSL_NO_VENDOR=1
+        export SETUPTOOLS_USE_DISTUTILS=stdlib
+        
+        echo "Installing frontend dependencies..."
+        python -m pip install --upgrade pip setuptools wheel
+        
+        # Install dependencies to site-packages
+        if [ -f requirements-optimized.txt ]; then
+          echo "Using optimized requirements..."
+          python -m pip install \
+            --target ./site-packages \
+            --upgrade \
+            --no-warn-script-location \
+            --no-build-isolation \
+            --prefer-binary \
+            -r requirements-optimized.txt
+        else
+          echo "Using standard requirements..."
+          python -m pip install \
+            --target ./site-packages \
+            --upgrade \
+            --no-warn-script-location \
+            --no-build-isolation \
+            --prefer-binary \
+            -r requirements.txt
+        fi
+        
+        # Ensure chainlit executable is available
+        if [ -f site-packages/bin/chainlit ]; then
+          echo "Creating chainlit wrapper..."
+          cat > chainlit << 'EOF'
+        #!/bin/bash
+        exec python -m chainlit "$@"
+        EOF
+          chmod +x chainlit
+        fi
+        
+        # List package contents for verification
+        echo ""
+        echo "Package contents:"
+        ls -la
+        echo ""
+        echo "Checking for chainlit installation:"
+        find site-packages -name "chainlit*" -type d | head -5
+        
+        cd ..
+        
+        # Create the deployment package
+        zip -r frontend-package.zip frontend/ \
           -x "*.git*" "*__pycache__*" "*.pyc" "*.pyo" "*.pyd" \
           ".env" "*.pytest_cache*" "*.DS_Store"
-        cd ..
-        rm -rf deploy-package
+        
         ls -lh frontend-package.zip
 
     - name: Azure Login
@@ -461,6 +574,27 @@ jobs:
     - name: Pre-deployment cleanup (Frontend)
       run: |
         echo "Preparing frontend deployment..."
+        
+        # App Service設定を最適化
+        echo "Configuring App Service settings for Python 3.11..."
+        az webapp config set \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --linux-fx-version "PYTHON|3.11" \
+          --startup-file "/home/site/wwwroot/frontend/startup.sh" \
+          --web-sockets-enabled true
+        
+        # 環境変数を設定
+        az webapp config appsettings set \
+          --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --settings \
+            CRYPTOGRAPHY_DONT_BUILD_RUST=1 \
+            PYOPENSSL_NO_VENDOR=1 \
+            PYTHONPATH="/home/site/wwwroot/frontend:/home/site/wwwroot/frontend/site-packages" \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+            WEBSITE_RUN_FROM_PACKAGE=0 \
+            ENABLE_ORYX_BUILD=false
         
         # WEBSITE_RUN_FROM_PACKAGEを削除して新しいデプロイを許可
         az webapp config appsettings delete \
@@ -493,7 +627,7 @@ jobs:
         az webapp config set \
           --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --startup-file 'chainlit run app.py --host 0.0.0.0 --port ${PORT:-8000}' \
+          --startup-file '/home/site/wwwroot/frontend/startup.sh' \
           --linux-fx-version "PYTHON|3.11" \
           --web-sockets-enabled true
         
@@ -505,11 +639,12 @@ jobs:
           --settings \
             BACKEND_API_URL="${{ steps.backend-url.outputs.BACKEND_URL }}" \
             PORT=8000 \
-            PYTHONPATH=/home/site/wwwroot \
+            PYTHONPATH="/home/site/wwwroot/frontend:/home/site/wwwroot/frontend/site-packages" \
             PYTHONUNBUFFERED=1 \
             CRYPTOGRAPHY_DONT_BUILD_RUST=1 \
             SCM_DO_BUILD_DURING_DEPLOYMENT=false \
-            WEBSITE_RUN_FROM_PACKAGE=1 \
+            WEBSITE_RUN_FROM_PACKAGE=0 \
+            ENABLE_ORYX_BUILD=false \
             WEBSITES_ENABLE_APP_SERVICE_STORAGE=false
         
         # フロントエンドデプロイ実行（大幅にタイムアウトを延長）
@@ -662,21 +797,101 @@ jobs:
 
     - name: Package frontend (zip)
       run: |
-        mkdir -p deploy-package/frontend
-        cp -r frontend/* deploy-package/frontend/
-        if [ -f frontend/requirements-optimized.txt ]; then
-          echo "Using optimized requirements for frontend deployment..."
-          cp frontend/requirements-optimized.txt deploy-package/requirements.txt
-        else
-          echo "Using standard requirements for frontend deployment..."
-          cp frontend/requirements.txt deploy-package/
+        echo "Creating frontend deployment package..."
+        
+        # Ensure frontend directory exists
+        if [ ! -d "frontend" ]; then
+          echo "❌ Frontend directory not found!"
+          exit 1
         fi
-        cd deploy-package
-        zip -r ../frontend-package.zip . \
+        
+        cd frontend
+        
+        # Create startup.sh script for frontend
+        cat > startup.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        echo "Starting Chainlit frontend application..."
+        
+        # Set Python path
+        export PYTHONPATH="/home/site/wwwroot/frontend:/home/site/wwwroot/frontend/site-packages:$PYTHONPATH"
+        
+        # Set port
+        export PORT=${PORT:-8000}
+        
+        # Change to frontend directory
+        cd /home/site/wwwroot/frontend
+        
+        # Install chainlit if not present (fallback)
+        if ! command -v chainlit &> /dev/null; then
+          echo "Chainlit not found in PATH, using Python module..."
+          python -m chainlit run app.py --host 0.0.0.0 --port $PORT
+        else
+          echo "Starting Chainlit on port $PORT..."
+          chainlit run app.py --host 0.0.0.0 --port $PORT
+        fi
+        EOF
+        
+        chmod +x startup.sh
+        
+        # Create site-packages directory structure
+        mkdir -p site-packages
+        
+        # Set environment variables for compatible package builds
+        export CRYPTOGRAPHY_DONT_BUILD_RUST=1
+        export PYOPENSSL_NO_VENDOR=1
+        export SETUPTOOLS_USE_DISTUTILS=stdlib
+        
+        echo "Installing frontend dependencies..."
+        python -m pip install --upgrade pip setuptools wheel
+        
+        # Install dependencies to site-packages
+        if [ -f requirements-optimized.txt ]; then
+          echo "Using optimized requirements..."
+          python -m pip install \
+            --target ./site-packages \
+            --upgrade \
+            --no-warn-script-location \
+            --no-build-isolation \
+            --prefer-binary \
+            -r requirements-optimized.txt
+        else
+          echo "Using standard requirements..."
+          python -m pip install \
+            --target ./site-packages \
+            --upgrade \
+            --no-warn-script-location \
+            --no-build-isolation \
+            --prefer-binary \
+            -r requirements.txt
+        fi
+        
+        # Ensure chainlit executable is available
+        if [ -f site-packages/bin/chainlit ]; then
+          echo "Creating chainlit wrapper..."
+          cat > chainlit << 'EOF'
+        #!/bin/bash
+        exec python -m chainlit "$@"
+        EOF
+          chmod +x chainlit
+        fi
+        
+        # List package contents for verification
+        echo ""
+        echo "Package contents:"
+        ls -la
+        echo ""
+        echo "Checking for chainlit installation:"
+        find site-packages -name "chainlit*" -type d | head -5
+        
+        cd ..
+        
+        # Create the deployment package
+        zip -r frontend-package.zip frontend/ \
           -x "*.git*" "*__pycache__*" "*.pyc" "*.pyo" "*.pyd" \
           ".env" "*.pytest_cache*" "*.DS_Store"
-        cd ..
-        rm -rf deploy-package
+        
         ls -lh frontend-package.zip
 
     - name: Azure Login
@@ -727,18 +942,19 @@ jobs:
           --settings \
             BACKEND_API_URL="${{ steps.backend-url.outputs.BACKEND_URL }}" \
             PORT=8000 \
-            PYTHONPATH=/home/site/wwwroot/frontend \
+            PYTHONPATH="/home/site/wwwroot/frontend:/home/site/wwwroot/frontend/site-packages" \
             PYTHONUNBUFFERED=1 \
             WEBSITE_PYTHON_VERSION=3.11 \
-            SCM_DO_BUILD_DURING_DEPLOYMENT=true \
-            ENABLE_ORYX_BUILD=true \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+            ENABLE_ORYX_BUILD=false \
+            WEBSITE_RUN_FROM_PACKAGE=0 \
             WEBSITES_ENABLE_APP_SERVICE_STORAGE=false
         
         echo "Setting startup command..."
         az webapp config set \
           --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --startup-file 'cd frontend && chainlit run app.py --host 0.0.0.0 --port ${PORT:-8000}' \
+          --startup-file '/home/site/wwwroot/frontend/startup.sh' \
           --linux-fx-version "PYTHON|3.11" \
           --web-sockets-enabled true
         

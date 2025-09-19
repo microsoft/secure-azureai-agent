@@ -160,11 +160,11 @@ jobs:
           --upgrade \
           --no-warn-script-location \
           --prefer-binary \
-          "cryptography>=3.4.8,<39.0.0" \
-          "pyopenssl>=21.0.0,<23.0.0" \
-          "cffi>=1.12.0,<2.0.0"
+          "cryptography==42.0.5" \
+          "pyopenssl==24.1.0" \
+          "cffi==1.16.0"
         
-        # Install remaining dependencies with binary preference
+        # Install remaining dependencies with binary preference  
         echo "Installing remaining dependencies..."
         python -m pip install \
           --target ./site-packages \
@@ -457,9 +457,9 @@ jobs:
           --upgrade \
           --no-warn-script-location \
           --prefer-binary \
-          "cryptography>=3.4.8,<39.0.0" \
-          "pyopenssl>=21.0.0,<23.0.0" \
-          "cffi>=1.12.0,<2.0.0"
+          "cryptography==42.0.5" \
+          "pyopenssl==24.1.0" \
+          "cffi==1.16.0"
 
         # Install dependencies to site-packages
         if [ -f requirements-optimized.txt ]; then
@@ -795,9 +795,9 @@ jobs:
           --upgrade \
           --no-warn-script-location \
           --prefer-binary \
-          "cryptography>=3.4.8,<39.0.0" \
-          "pyopenssl>=21.0.0,<23.0.0" \
-          "cffi>=1.12.0,<2.0.0"
+          "cryptography==42.0.5" \
+          "pyopenssl==24.1.0" \
+          "cffi==1.16.0"
 
         # Create site-packages directory structure
         mkdir -p site-packages

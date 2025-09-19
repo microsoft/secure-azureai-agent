@@ -163,7 +163,7 @@ jobs:
           --prefer-binary \
           "cryptography==3.4.8" \
           "pyopenssl==21.0.0" \
-          "cffi==1.15.0" \
+          "cffi==1.15.1" \
           "pycparser==2.21"
         
         # Install remaining dependencies with binary preference  
@@ -462,7 +462,7 @@ jobs:
           --prefer-binary \
           "cryptography==3.4.8" \
           "pyopenssl==21.0.0" \
-          "cffi==1.15.0" \
+          "cffi==1.15.1" \
           "pycparser==2.21"
 
         # Install dependencies to site-packages
@@ -802,7 +802,7 @@ jobs:
           --prefer-binary \
           "cryptography==3.4.8" \
           "pyopenssl==21.0.0" \
-          "cffi==1.15.0" \
+          "cffi==1.15.1" \
           "pycparser==2.21"
 
         # Create site-packages directory structure

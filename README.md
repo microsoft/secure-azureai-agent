@@ -34,16 +34,63 @@ A secure, enterprise-ready AI agent system for Azure troubleshooting and support
    cd secure-azureai-agent
    ```
 
-2. Copy the environment file and configure your settings:
+2. Set up environment variables:
    ```bash
-   # For hands-on workshops (recommended for beginners)
+   # Copy the environment template
    cp .env.template .env
    
-   # For standard development
-   cp .env.sample .env
-   
-   # Edit .env with your Azure OpenAI and other service configurations
+   # Edit .env with your Azure service configurations
    ```
+   
+   **Required Environment Variables:**
+   | Variable | Description | Example |
+   |----------|-------------|---------|
+   | `AZURE_OPENAI_ENDPOINT` | Azure OpenAI service endpoint URL | `https://your-openai.openai.azure.com` |
+   | `AZURE_OPENAI_API_KEY` | API key for Azure OpenAI | `your-api-key-here` |
+   | `AZURE_KEY_VAULT_URL` | Azure Key Vault URL (if using) | `https://your-keyvault.vault.azure.net/` |
+   | `AZURE_CLIENT_ID` | Managed Identity Client ID (if using) | `00000000-0000-0000-0000-000000000000` |
+   | `FRONTEND_URL` | Frontend application URL | `https://your-frontend.azurewebsites.net` |
+   | `BACKEND_API_URL` | Backend API URL | `https://your-backend.azurewebsites.net` |
+   | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Application Insights connection string | `InstrumentationKey=...` |
+   | `AZURE_SUBSCRIPTION_ID` | Azure subscription ID | `00000000-0000-0000-0000-000000000000` |
+   | `AZURE_RESOURCE_GROUP` | Resource group name | `my-resource-group` |
+   | `AZURE_LOCATION` | Azure region | `eastus` |
+   
+   **Environment Variable Setup Methods:**
+   
+   **Method 1: Using .env file (Local Development)**
+   1. Copy `.env.template` to `.env`
+   2. Edit `.env` file with your values:
+      ```bash
+      AZURE_OPENAI_ENDPOINT=https://your-openai.openai.azure.com
+      AZURE_OPENAI_API_KEY=your-api-key-here
+      AZURE_KEY_VAULT_URL=https://your-keyvault.vault.azure.net/
+      # ... other variables
+      ```
+   
+   **Method 2: Using Azure CLI (for local testing)**
+   ```bash
+   # Set environment variables for current session
+   export AZURE_OPENAI_ENDPOINT="https://your-openai.openai.azure.com"
+   export AZURE_OPENAI_API_KEY="your-api-key-here"
+   export AZURE_KEY_VAULT_URL="https://your-keyvault.vault.azure.net/"
+   # ... add other variables as needed
+   ```
+   
+   **Method 3: Using Azure App Service Configuration (Production)**
+   ```bash
+   # Set app settings for your App Service
+   az webapp config appsettings set --resource-group <resource-group> --name <app-name> \
+     --settings AZURE_OPENAI_ENDPOINT="https://your-openai.openai.azure.com" \
+                AZURE_OPENAI_API_KEY="your-api-key-here" \
+                AZURE_KEY_VAULT_URL="https://your-keyvault.vault.azure.net/"
+   ```
+   
+   **Finding Your Azure Service Values:**
+   - **Azure OpenAI Endpoint & API Key**: Found in Azure Portal → AI Foundry → Your OpenAI resource
+   - **Key Vault URL**: Azure Portal → Key Vault → Your vault → Properties → Vault URI
+   - **Managed Identity Client ID**: Azure Portal → Managed Identity → Your identity → Properties → Client ID
+   - **Application Insights Connection String**: Azure Portal → Application Insights → Your resource → Properties
 
 3. Install dependencies:
    ```bash
@@ -98,12 +145,49 @@ azd up
 
 ## Configuration
 
+### Main Application Configuration
+
 Configure the application using environment variables in `.env`:
 
 - `AZURE_OPENAI_ENDPOINT`: Your Azure OpenAI service endpoint
 - `AZURE_OPENAI_API_KEY`: API key for Azure OpenAI
 - `AZURE_OPENAI_DEPLOYMENT_NAME`: Deployment name for your model
-- Additional configuration options available in `.env.sample`
+- Additional configuration options available in `.env.template`
+
+### Evaluation System Configuration
+
+For the evaluation system (`eval/` directory), create a separate `.env` file:
+
+```bash
+# Navigate to eval directory
+cd eval
+
+# Copy the example environment file
+cp .env.example .env
+
+# Edit .env with your configuration
+```
+
+**Required variables for evaluation system:**
+- `AZURE_SEARCH_ENDPOINT`: Azure AI Search service endpoint
+- `AZURE_SEARCH_INDEX_NAME`: Search index name
+- `AZURE_OPENAI_ENDPOINT`: Azure OpenAI endpoint (same as main app)
+- `AZURE_OPENAI_DEPLOYMENT_NAME`: Model deployment name
+- `USE_MANAGED_IDENTITY`: Set to `true` for Azure-hosted deployment
+
+**Security Best Practices:**
+1. Never commit `.env` files to version control
+2. Use Azure Key Vault for production secrets
+3. Enable Managed Identity when deploying to Azure
+4. Rotate API keys regularly
+5. Use different configurations for development, staging, and production
+
+**Troubleshooting Environment Variables:**
+- Check if `.env` file exists in the correct directory
+- Verify environment variable names match exactly (case-sensitive)
+- Ensure no trailing spaces in variable values
+- Use quotes for values containing special characters
+- Check Azure resource permissions if using Managed Identity
 
 ## Documentation
 

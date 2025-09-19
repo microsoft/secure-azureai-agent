@@ -129,10 +129,18 @@ jobs:
         
         # Start Gunicorn with Uvicorn workers for FastAPI
         echo "Starting Gunicorn with Uvicorn workers on port $PORT..."
-        gunicorn main:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120 --access-logfile=- --error-logfile=-
+        exec gunicorn main:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120 --access-logfile=- --error-logfile=-
         EOF
         
         chmod +x startup.sh
+        
+        # Create run.sh as an alternative startup script
+        cat > run.sh << 'EOF'
+        #!/bin/bash
+        exec /home/site/wwwroot/startup.sh
+        EOF
+        
+        chmod +x run.sh
         
         # Create site-packages directory structure
         mkdir -p site-packages
@@ -215,7 +223,7 @@ jobs:
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group redteaming-demo-rg-swe-mkurahara \
           --linux-fx-version "PYTHON|3.11" \
-          --startup-file "/home/site/wwwroot/startup.sh"
+          --startup-file "run.sh"
         
         # 環境変数を設定（GLIBC互換性のため）
         az webapp config appsettings set \
@@ -227,7 +235,8 @@ jobs:
             PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages" \
             SCM_DO_BUILD_DURING_DEPLOYMENT=false \
             WEBSITE_RUN_FROM_PACKAGE=0 \
-            ENABLE_ORYX_BUILD=false
+            ENABLE_ORYX_BUILD=false \
+            DISABLE_ORYX_BUILD=true
 
     - name: Deploy Backend to Azure App Service
       uses: azure/webapps-deploy@v2
@@ -235,7 +244,7 @@ jobs:
         app-name: ${{ env.AZURE_WEBAPP_BACKEND_NAME }}
         publish-profile: ${{ secrets.AZURE_WEBAPP_BACKEND_PUBLISH_PROFILE }}
         package: backend/
-        startup-command: '/home/site/wwwroot/startup.sh'
+        startup-command: 'run.sh'
 
     - name: Backend Deploy (no-build mode with extended timeout)
       run: |
@@ -258,6 +267,7 @@ jobs:
             SCM_DO_BUILD_DURING_DEPLOYMENT=false \
             WEBSITE_RUN_FROM_PACKAGE=0 \
             ENABLE_ORYX_BUILD=false \
+            DISABLE_ORYX_BUILD=true \
             PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages" \
             PORT=8000
             
@@ -266,7 +276,7 @@ jobs:
         az webapp config set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --startup-file '/home/site/wwwroot/startup.sh'
+          --startup-file 'run.sh'
         
         # Create deployment package
         echo "Creating deployment package..."

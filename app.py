@@ -11,13 +11,16 @@ import subprocess
 import logging
 from pathlib import Path
 from typing import Optional
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, WebSocket
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse, Response
+from starlette.websockets import WebSocketDisconnect
 import httpx
+import websockets
 import uvicorn
 
 # ロギング設定
@@ -127,6 +130,10 @@ class ProxyMiddleware(BaseHTTPMiddleware):
             path.startswith("/openapi.json")):
             return await call_next(request)
         
+        # WebSocket接続は特別に処理（ミドルウェアでは処理できないため、別途ルートで処理）
+        if path.startswith("/ws") or path.startswith("/chat/ws") or "websocket" in request.headers.get("upgrade", "").lower():
+            return await call_next(request)
+        
         # Chainlit が起動していない場合はエラーページを表示
         if not self.chainlit_manager.is_running:
             return HTMLResponse(
@@ -163,11 +170,18 @@ class ProxyMiddleware(BaseHTTPMiddleware):
                     content=await request.body()
                 )
                 
+                # レスポンスヘッダーを適切に処理
+                headers = dict(response.headers)
+                
+                # Content-Length ヘッダーを削除して自動計算させる
+                headers.pop("content-length", None)
+                headers.pop("transfer-encoding", None)
+                
                 # WebSocketの場合は特別な処理が必要だが、今回は簡略化
                 return Response(
                     content=response.content,
                     status_code=response.status_code,
-                    headers=dict(response.headers),
+                    headers=headers,
                     media_type=response.headers.get("content-type")
                 )
                 
@@ -197,11 +211,30 @@ class ProxyMiddleware(BaseHTTPMiddleware):
 # Chainlit マネージャーのインスタンス
 chainlit_manager = ChainlitManager()
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """アプリケーションのライフサイクル管理"""
+    # Startup
+    logger.info("🚀 Starting unified application")
+    try:
+        await chainlit_manager.start_chainlit()
+        logger.info("✅ Unified application started successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to start Chainlit: {e}")
+        # Chainlit が起動しなくても、バックエンド API は使用可能
+    
+    yield
+    
+    # Shutdown
+    logger.info("🛑 Shutting down unified application")
+    chainlit_manager.stop_chainlit()
+
 # メインアプリケーション
 app = FastAPI(
     title="Azure Troubleshoot Agent - Unified App",
     description="FastAPI + Chainlit integrated application for Azure troubleshooting",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # バックエンドアプリをマウント
@@ -228,41 +261,116 @@ async def root():
     """ルートパスは Chainlit にリダイレクト"""
     return RedirectResponse(url="/", status_code=302)
 
-# アプリケーションのライフサイクル管理
-@app.on_event("startup")
-async def startup_event():
-    """アプリケーション起動時の処理"""
-    logger.info("🚀 Starting unified application")
+# WebSocket プロキシエンドポイント
+@app.websocket("/ws/{path:path}")
+async def websocket_proxy(websocket: WebSocket, path: str):
+    """WebSocket 接続を Chainlit にプロキシ"""
+    if not chainlit_manager.is_running:
+        await websocket.close(code=1001, reason="Service is starting")
+        return
+    
+    await websocket.accept()
+    
+    # Chainlit WebSocket URL
+    chainlit_ws_url = f"ws://localhost:{CHAINLIT_PORT}/ws/{path}"
+    
     try:
-        await chainlit_manager.start_chainlit()
-        logger.info("✅ Unified application started successfully")
+        async with websockets.connect(chainlit_ws_url) as chainlit_ws:
+            # 双方向でメッセージを転送
+            async def forward_to_chainlit():
+                try:
+                    while True:
+                        data = await websocket.receive_text()
+                        await chainlit_ws.send(data)
+                except WebSocketDisconnect:
+                    await chainlit_ws.close()
+            
+            async def forward_from_chainlit():
+                try:
+                    async for message in chainlit_ws:
+                        await websocket.send_text(message)
+                except websockets.exceptions.ConnectionClosed:
+                    await websocket.close()
+            
+            # 両方のタスクを並行して実行
+            await asyncio.gather(
+                forward_to_chainlit(),
+                forward_from_chainlit(),
+                return_exceptions=True
+            )
+            
     except Exception as e:
-        logger.error(f"❌ Failed to start Chainlit: {e}")
-        # Chainlit が起動しなくても、バックエンド API は使用可能
+        logger.error(f"WebSocket proxy error: {e}")
+        await websocket.close(code=1011, reason="Internal error")
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """アプリケーション終了時の処理"""
-    logger.info("🛑 Shutting down unified application")
-    chainlit_manager.stop_chainlit()
+# Chainlit の WebSocket エンドポイント用
+@app.websocket("/chat/ws")
+async def chat_websocket_proxy(websocket: WebSocket):
+    """Chat WebSocket を Chainlit にプロキシ"""
+    if not chainlit_manager.is_running:
+        await websocket.close(code=1001, reason="Service is starting")
+        return
+    
+    await websocket.accept()
+    
+    # Chainlit WebSocket URL
+    chainlit_ws_url = f"ws://localhost:{CHAINLIT_PORT}/chat/ws"
+    
+    try:
+        async with websockets.connect(chainlit_ws_url) as chainlit_ws:
+            # 双方向でメッセージを転送
+            async def forward_to_chainlit():
+                try:
+                    while True:
+                        data = await websocket.receive_text()
+                        await chainlit_ws.send(data)
+                except WebSocketDisconnect:
+                    await chainlit_ws.close()
+            
+            async def forward_from_chainlit():
+                try:
+                    async for message in chainlit_ws:
+                        await websocket.send_text(message)
+                except websockets.exceptions.ConnectionClosed:
+                    await websocket.close()
+            
+            # 両方のタスクを並行して実行
+            await asyncio.gather(
+                forward_to_chainlit(),
+                forward_from_chainlit(),
+                return_exceptions=True
+            )
+            
+    except Exception as e:
+        logger.error(f"Chat WebSocket proxy error: {e}")
+        await websocket.close(code=1011, reason="Internal error")
 
 # シグナルハンドラー
 def signal_handler(sig, frame):
     """シグナル受信時の処理"""
     logger.info(f"📨 Received signal {sig}")
     chainlit_manager.stop_chainlit()
-    sys.exit(0)
+    # 通常の終了プロセスに任せる（exit()の代わりにraiseを使用）
+    raise KeyboardInterrupt()
 
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 if __name__ == "__main__":
     logger.info(f"🚀 Starting unified app on port {PORT}")
-    uvicorn.run(
-        "app:app",
-        host="0.0.0.0",
-        port=PORT,
-        workers=1,  # 単一ワーカーで実行（サブプロセス管理のため）
-        access_log=True,
-        log_level="info"
-    )
+    try:
+        uvicorn.run(
+            "app:app",
+            host="0.0.0.0",
+            port=PORT,
+            workers=1,  # 単一ワーカーで実行（サブプロセス管理のため）
+            access_log=True,
+            log_level="info"
+        )
+    except KeyboardInterrupt:
+        logger.info("👋 Received keyboard interrupt, shutting down gracefully")
+    except Exception as e:
+        logger.error(f"❌ Application error: {e}")
+    finally:
+        chainlit_manager.stop_chainlit()
+        logger.info("✅ Application shutdown complete")

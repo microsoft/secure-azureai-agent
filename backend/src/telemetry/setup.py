@@ -22,24 +22,28 @@ def setup_telemetry():
     # Get Application Insights connection string from AI Project (recommended)
     connection_string = None
     AIAgentsInstrumentor().instrument()
-    try:
-        endpoint = os.environ["PROJECT_ENDPOINT"]
-        project_client = AIProjectClient(
-            credential=DefaultAzureCredential(),
-            endpoint=endpoint,
-        )
-        connection_string = project_client.telemetry.get_application_insights_connection_string()
-    except KeyError:
-        logger.warning("PROJECT_ENDPOINT is not set. Will look for a connection string in environment variables.")
-    except Exception as e:
-        logger.warning(f"Failed to get connection string from AIProjectClient: {e}. Falling back to environment variables.")
+    
+    # Check for PROJECT_ENDPOINT first
+    project_endpoint = os.environ.get("PROJECT_ENDPOINT")
+    if project_endpoint:
+        try:
+            project_client = AIProjectClient(
+                credential=DefaultAzureCredential(),
+                endpoint=project_endpoint,
+            )
+            connection_string = project_client.telemetry.get_application_insights_connection_string()
+            logger.info("Successfully retrieved connection string from AI Project")
+        except Exception as e:
+            logger.warning(f"Failed to get connection string from AIProjectClient: {e}. Falling back to environment variables.")
+    else:
+        logger.info("PROJECT_ENDPOINT is not set. Looking for connection string in environment variables.")
 
     # Fallback: read from environment variables
     if not connection_string:
         connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
 
     if not connection_string:
-        logger.warning("Application Insights connection string not found. Telemetry will be disabled.")
+        logger.info("Application Insights connection string not found. Telemetry is disabled for this session.")
         return
 
     try:

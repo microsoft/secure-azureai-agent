@@ -1,0 +1,74 @@
+# Azure Developer CLI Configuration Template for Hands-on Workshop
+# 
+# このファイルは Azureの継続的デプロイで自動生成される azure.yaml をベースに
+# 参加者が編集するためのテンプレートです。
+#
+# 使い方:
+# 1. このファイルを azure.yaml という名前でコピー
+# 2. 下記の手順に従って編集
+# 3. GitHub にコミット・プッシュ
+
+# ========================================
+# Step 1: アプリケーション名の設定 (必須)
+# ========================================
+# TODO: {your-name} を自分の名前（英数字のみ）に置き換えてください
+# 例: secure-azureai-agent-tanaka
+name: secure-azureai-agent-{your-name}
+
+# ========================================
+# Step 2: メタデータの設定 (オプション)
+# ========================================
+metadata:
+  template: secure-azureai-agent-unified@1.0.0
+  description: "Azure AI エージェント統合アプリケーション"
+
+# ========================================
+# Step 3: サービス設定 (必須)
+# ========================================
+services:
+  # サービス名: unified-app (変更不要)
+  unified-app:
+    project: .                    # プロジェクトルート
+    host: appservice             # Azure App Service使用
+    language: python             # Python アプリケーション
+    
+    # ========================================
+    # Step 4: 詳細設定 (編集推奨)
+    # ========================================
+    config:
+      # Python バージョン設定
+      pythonVersion: "3.12"      # TODO: 必要に応じて変更
+      
+      # アプリケーション環境変数
+      appSettings:
+        # 環境設定
+        ENVIRONMENT: "production"
+        
+        # ポート設定 (重要: 変更しないでください)
+        CHAINLIT_PORT: "8501"
+        WEBSITES_PORT: "8000"
+        
+        # Python パス設定
+        PYTHONPATH: "/home/site/wwwroot/backend/src"
+        
+        # ビルド設定 (Azureで必要)
+        SCM_DO_BUILD_DURING_DEPLOYMENT: "true"
+        ENABLE_ORYX_BUILD: "true"
+        
+      # 起動設定
+      startupCommand: "bash startup.sh"
+      
+      # リソース設定
+      sku: B1                     # Basic プラン (十分な性能)
+
+# ========================================
+# Step 5: デプロイフック (オプション)
+# ========================================
+hooks:
+  # デプロイ前処理
+  predeploy:
+    - echo "📦 デプロイを準備しています..."
+    
+  # デプロイ後処理  
+  postdeploy:
+    - echo "✅ デプロイが正常に完了しました!"

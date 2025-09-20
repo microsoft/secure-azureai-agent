@@ -1,7 +1,19 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
-*.py[codz]
+*.py[cod]
 *$py.class
+
+# Azure & Hands-on specific
+# ========================
+# Participants will create their own azure.yaml from template
+azure.yaml
+
+# Azure Developer CLI
+.azure/
+
+# However, keep template and example files
+!azure.yaml.template
+!azure.yaml.example
 
 # C extensions
 *.so

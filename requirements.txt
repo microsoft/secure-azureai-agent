@@ -22,4 +22,4 @@ httpx==0.28.1
 pydantic==2.11.7
 
 # 追加の統合アプリ用依存関係
-starlette==0.41.2
+starlette==0.47.2

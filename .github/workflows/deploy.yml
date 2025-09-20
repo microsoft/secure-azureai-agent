@@ -37,7 +37,7 @@ env:
   AZURE_RESOURCE_GROUP: 'redteaming-demo-rg-swe-mkurahara'          # 🔧 変更必要: あなたのResource Group名
   
   # その他の設定
-  PYTHON_VERSION: '3.11'                                           # Chainlitとの互換性のため3.11を使用
+  PYTHON_VERSION: '3.12'                                           # Chainlitとの互換性のため3.12を使用
 
 jobs:
   # 変更の検出
@@ -97,7 +97,7 @@ jobs:
     - name: Set up Python Backend
       uses: actions/setup-python@v4
       with:
-        python-version: '3.11'
+        python-version: '3.12'
 
     - name: Create Backend Package
       run: |
@@ -191,11 +191,11 @@ jobs:
         echo "Latest deployment status: $LATEST_DEPLOYMENT"
         
         # App Service設定を最適化
-        echo "Configuring App Service settings for Python 3.11..."
+        echo "Configuring App Service settings for Python 3.12..."
         az webapp config set \
           --name ${{ env.AZURE_WEBAPP_BACKEND_NAME }} \
           --resource-group redteaming-demo-rg-swe-mkurahara \
-          --linux-fx-version "PYTHON|3.11" \
+          --linux-fx-version "PYTHON|3.12" \
           --startup-file "run.sh"
         
         # Azure Remote Build用の環境変数を設定
@@ -250,7 +250,7 @@ jobs:
             PYTHONPATH="/home/site/wwwroot:/home/site/wwwroot/site-packages" \
             PYTHONUNBUFFERED=1 \
             ENVIRONMENT=production \
-            WEBSITE_PYTHON_VERSION=3.11 \
+            WEBSITE_PYTHON_VERSION=3.12 \
             SCM_DO_BUILD_DURING_DEPLOYMENT=false \
             ENABLE_ORYX_BUILD=false \
             DISABLE_ORYX_BUILD=true \
@@ -501,11 +501,11 @@ jobs:
         echo "Preparing frontend deployment..."
         
         # App Service設定を最適化
-        echo "Configuring App Service settings for Python 3.11..."
+        echo "Configuring App Service settings for Python 3.12..."
         az webapp config set \
           --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --linux-fx-version "PYTHON|3.11" \
+          --linux-fx-version "PYTHON|3.12" \
           --startup-file "/home/site/wwwroot/frontend/startup.sh" \
           --web-sockets-enabled true
         
@@ -548,12 +548,12 @@ jobs:
         set -euo pipefail
         
         # フロントエンドApp Service設定を最適化
-        echo "Configuring Frontend App Service for Python 3.11..."
+        echo "Configuring Frontend App Service for Python 3.12..."
         az webapp config set \
           --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --startup-file '/home/site/wwwroot/frontend/startup.sh' \
-          --linux-fx-version "PYTHON|3.11" \
+          --linux-fx-version "PYTHON|3.12" \
           --web-sockets-enabled true
         
         # 環境変数の設定（GLIBC互換性含む）
@@ -882,7 +882,7 @@ jobs:
             PORT=8000 \
             PYTHONPATH="/home/site/wwwroot/frontend:/home/site/wwwroot/frontend/site-packages" \
             PYTHONUNBUFFERED=1 \
-            WEBSITE_PYTHON_VERSION=3.11 \
+            WEBSITE_PYTHON_VERSION=3.12 \
             SCM_DO_BUILD_DURING_DEPLOYMENT=false \
             ENABLE_ORYX_BUILD=false \
             WEBSITE_RUN_FROM_PACKAGE=0 \
@@ -893,7 +893,7 @@ jobs:
           --name ${{ env.AZURE_WEBAPP_FRONTEND_NAME }} \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --startup-file '/home/site/wwwroot/frontend/startup.sh' \
-          --linux-fx-version "PYTHON|3.11" \
+          --linux-fx-version "PYTHON|3.12" \
           --web-sockets-enabled true
         
         echo "Deploying frontend package..."

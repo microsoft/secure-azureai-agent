@@ -44,7 +44,7 @@ unified-app/
 
 ### 前提条件
 
-- Python 3.11+
+- Python 3.12+
 - Azure CLI
 - Azure Developer CLI (azd)
 
@@ -117,7 +117,7 @@ azd deploy
 
 ### Azure App Service 設定
 
-- **Python バージョン**: 3.11
+- **Python バージョン**: 3.12
 - **起動コマンド**: `bash startup.sh`
 - **Always On**: 有効
 - **HTTPS Only**: 有効

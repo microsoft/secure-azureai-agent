@@ -12,10 +12,6 @@ param location string
 @description('Resource group name')
 param resourceGroupName string = 'rg-${environmentName}'
 
-// Additional parameters for environment variables
-@description('Frontend URL for CORS configuration')
-param frontendUrl string = ''
-
 @description('Environment type (development, staging, production)')
 param environment string = 'development'
 
@@ -28,14 +24,13 @@ resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
   }
 }
 
-// Deploy resources module
-module resources 'resources.bicep' = {
-  name: 'resources'
+// Deploy unified app resources
+module resources 'unified-resources.bicep' = {
+  name: 'unified-resources'
   scope: rg
   params: {
     location: location
     environmentName: environmentName
-    frontendUrl: frontendUrl
     environment: environment
   }
 }
@@ -44,5 +39,4 @@ module resources 'resources.bicep' = {
 output RESOURCE_GROUP_ID string = rg.id
 output AZURE_OPENAI_ENDPOINT string = resources.outputs.AZURE_OPENAI_ENDPOINT
 output AZURE_KEY_VAULT_URL string = resources.outputs.AZURE_KEY_VAULT_URL
-output BACKEND_URI string = resources.outputs.BACKEND_URI
-output FRONTEND_URI string = resources.outputs.FRONTEND_URI
+output UNIFIED_APP_URI string = resources.outputs.UNIFIED_APP_URI

@@ -1,7 +1,5 @@
-# Combined requirements for the secure-azureai-agent project
-# This file consolidates dependencies from backend/, frontend/, and eval/ directories
-
-# Backend dependencies (FastAPI backend service)
+# 統合アプリケーション用依存関係
+# Backend 依存関係
 fastapi==0.116.1
 uvicorn==0.35.0
 gunicorn==23.0.0
@@ -13,16 +11,15 @@ azure-monitor-opentelemetry==1.6.7
 opentelemetry-api==1.34.1
 opentelemetry-sdk==1.34.1
 opentelemetry-instrumentation-fastapi==0.55b1
-pydantic==2.11.7
 python-multipart==0.0.20
-httpx==0.28.1
 python-dotenv==1.1.1
 
-# Frontend dependencies (Chainlit frontend)
+# Frontend 依存関係
 chainlit==2.7.1.1
 
-# Evaluation dependencies
-azure-ai-evaluation[redteam]
+# 共通依存関係（重複削除済み）
+httpx==0.28.1
+pydantic==2.11.7
 
-# Note: Frontend dependencies like httpx, python-dotenv, and pydantic are already included above
-# from backend dependencies, so they don't need to be duplicated here.
+# 追加の統合アプリ用依存関係
+starlette==0.41.2

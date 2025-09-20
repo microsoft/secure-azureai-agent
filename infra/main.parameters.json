@@ -8,12 +8,6 @@
     "location": {
       "value": "${AZURE_LOCATION}"
     },
-    "resourceGroupName": {
-      "value": "rg-${AZURE_ENV_NAME}"
-    },
-    "frontendUrl": {
-      "value": ""
-    },
     "environment": {
       "value": "production"
     }

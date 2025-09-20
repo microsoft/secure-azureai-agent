@@ -1,3 +1,4 @@
 [config]
-SCM_BUILD_ARGS=--platform python --platform-version 3.11
-PROJECT=backend/
+command = bash startup.sh
+SCM_DO_BUILD_DURING_DEPLOYMENT = true
+ENABLE_ORYX_BUILD = true

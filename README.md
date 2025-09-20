@@ -1,239 +1,189 @@
-# Secure Azure AI Agent
+# 🚀 Azure AI Agent - 統合アプリケーション
 
-A secure, enterprise-ready AI agent system for Azure troubleshooting and support scenarios. This application provides intelligent assistance for Azure-related issues through a multi-agent architecture built with Microsoft Semantic Kernel.
+この統合アプリケーションは、Azure Troubleshoot AgentのFastAPIバックエンドとChainlitフロントエンドを単一のApp Serviceで動作させるために設計されています。
 
-## Features
+## 🏗️ アーキテクチャ
 
-- **Multi-Agent Architecture**: Specialized agents for different types of Azure troubleshooting scenarios
-- **Secure by Design**: Enterprise security features with Azure AD integration and secure credential management
-- **Real-time Chat Interface**: Interactive web-based chat powered by Chainlit
-- **Azure Integration**: Deep integration with Azure services and APIs for comprehensive troubleshooting
-- **Observability**: Built-in telemetry and monitoring with OpenTelemetry
-- **Scalable Deployment**: Ready for Azure App Service deployment with infrastructure as code
+```
+統合アプリケーション (app.py)
+├── FastAPI Backend (port 8000)
+│   ├── /api/* - APIエンドポイント
+│   ├── /health - ヘルスチェック
+│   └── /docs - API ドキュメント
+└── Chainlit Frontend (port 8501)
+    └── Proxy による UI 提供
+```
 
-## Architecture
+## 📁 ディレクトリ構造
 
-- **Backend**: FastAPI-based REST API with Semantic Kernel agents
-- **Frontend**: Chainlit web interface for user interactions
-- **Infrastructure**: Azure App Service deployment with Bicep templates
-- **AI Services**: Azure OpenAI integration for intelligent responses
+```
+unified-app/
+├── app.py                  # 統合アプリケーション（メインエントリーポイント）
+├── requirements.txt        # 統合された依存関係
+├── startup.sh             # Azure App Service 起動スクリプト
+├── azure.yaml             # Azure Developer CLI 設定
+├── .deployment            # Azure デプロイメント設定
+├── backend/               # バックエンドコード
+│   ├── src/
+│   │   ├── main.py       # FastAPI アプリケーション
+│   │   ├── agents/       # Azure Troubleshoot Agent
+│   │   ├── telemetry/    # テレメトリ設定
+│   │   └── utils/        # ユーティリティ
+│   └── requirements.txt
+├── frontend/              # フロントエンドコード
+│   ├── app.py           # Chainlit アプリケーション
+│   ├── chainlit.md      # UI 設定
+│   └── requirements.txt
+└── infra/                # Azure インフラストラクチャ
+    ├── main.bicep       # メイン Bicep テンプレート
+    ├── unified-resources.bicep  # リソース定義
+    └── main.parameters.json     # パラメータファイル
+```
 
-## Quick Start
+## 🛠️ ローカル開発
 
-### Prerequisites
+### 前提条件
 
-- Python 3.8+
-- Azure subscription
-- Azure OpenAI service endpoint
+- Python 3.11+
+- Azure CLI
+- Azure Developer CLI (azd)
 
-### Local Development
+### セットアップ
 
-1. Clone the repository:
+1. 依存関係のインストール:
    ```bash
-   git clone https://github.com/microsoft/secure-azureai-agent.git
-   cd secure-azureai-agent
-   ```
-
-2. Set up environment variables:
-   ```bash
-   # Copy the environment template
-   cp .env.template .env
-   
-   # Edit .env with your Azure service configurations
-   ```
-   
-   **Required Environment Variables:**
-   | Variable | Description | Example |
-   |----------|-------------|---------|
-   | `AZURE_OPENAI_ENDPOINT` | Azure OpenAI service endpoint URL | `https://your-openai.openai.azure.com` |
-   | `AZURE_OPENAI_API_KEY` | API key for Azure OpenAI | `your-api-key-here` |
-   | `AZURE_KEY_VAULT_URL` | Azure Key Vault URL (if using) | `https://your-keyvault.vault.azure.net/` |
-   | `AZURE_CLIENT_ID` | Managed Identity Client ID (if using) | `00000000-0000-0000-0000-000000000000` |
-   | `FRONTEND_URL` | Frontend application URL | `https://your-frontend.azurewebsites.net` |
-   | `BACKEND_API_URL` | Backend API URL | `https://your-backend.azurewebsites.net` |
-   | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Application Insights connection string | `InstrumentationKey=...` |
-   | `AZURE_SUBSCRIPTION_ID` | Azure subscription ID | `00000000-0000-0000-0000-000000000000` |
-   | `AZURE_RESOURCE_GROUP` | Resource group name | `my-resource-group` |
-   | `AZURE_LOCATION` | Azure region | `eastus` |
-   
-   **Environment Variable Setup Methods:**
-   
-   **Method 1: Using .env file (Local Development)**
-   1. Copy `.env.template` to `.env`
-   2. Edit `.env` file with your values:
-      ```bash
-      AZURE_OPENAI_ENDPOINT=https://your-openai.openai.azure.com
-      AZURE_OPENAI_API_KEY=your-api-key-here
-      AZURE_KEY_VAULT_URL=https://your-keyvault.vault.azure.net/
-      # ... other variables
-      ```
-   
-   **Method 2: Using Azure CLI (for local testing)**
-   ```bash
-   # Set environment variables for current session
-   export AZURE_OPENAI_ENDPOINT="https://your-openai.openai.azure.com"
-   export AZURE_OPENAI_API_KEY="your-api-key-here"
-   export AZURE_KEY_VAULT_URL="https://your-keyvault.vault.azure.net/"
-   # ... add other variables as needed
-   ```
-   
-   **Method 3: Using Azure App Service Configuration (Production)**
-   ```bash
-   # Set app settings for your App Service
-   az webapp config appsettings set --resource-group <resource-group> --name <app-name> \
-     --settings AZURE_OPENAI_ENDPOINT="https://your-openai.openai.azure.com" \
-                AZURE_OPENAI_API_KEY="your-api-key-here" \
-                AZURE_KEY_VAULT_URL="https://your-keyvault.vault.azure.net/"
-   ```
-   
-   **Finding Your Azure Service Values:**
-   - **Azure OpenAI Endpoint & API Key**: Found in Azure Portal → AI Foundry → Your OpenAI resource
-   - **Key Vault URL**: Azure Portal → Key Vault → Your vault → Properties → Vault URI
-   - **Managed Identity Client ID**: Azure Portal → Managed Identity → Your identity → Properties → Client ID
-   - **Application Insights Connection String**: Azure Portal → Application Insights → Your resource → Properties
-
-3. Install dependencies:
-   ```bash
-   # Backend
-   cd backend
-   pip install -r requirements.txt
-   
-   # Frontend
-   cd ../frontend
    pip install -r requirements.txt
    ```
 
-4. Run the application:
+2. 環境変数の設定:
    ```bash
-   # Start backend (in one terminal)
-   cd backend
-   python -m uvicorn src.main:app --reload
-   
-   # Start frontend (in another terminal)
-   cd frontend
-   chainlit run app.py
+   # .env ファイルを作成
+   ENVIRONMENT=development
+   CHAINLIT_PORT=8501
+   AZURE_KEY_VAULT_URL=your-key-vault-url
+   AZURE_OPENAI_ENDPOINT=your-openai-endpoint
    ```
 
-### Azure Deployment
+3. アプリケーションの起動:
+   ```bash
+   python app.py
+   ```
 
-## 🎓 ハンズオン形式で学ぶ
-このプロジェクトはハンズオン形式で学習できるように設計されています。既存のAzureリソースを使用してCI/CDパイプラインを構築し、Pythonアプリケーションをデプロイする方法を学べます。
+アプリケーションは `http://localhost:8000` で起動し、UIは自動的にChainlitにプロキシされます。
 
-**👉 [ハンズオンガイドを始める](HANDS-ON-GUIDE.md)**
+## 🚀 Azure デプロイメント
 
-### 📖 詳細なドキュメント
-- [DEPLOYMENT.md](DEPLOYMENT.md) - 詳細なデプロイメント手順
-- [EXISTING-RESOURCES-CONFIG.md](EXISTING-RESOURCES-CONFIG.md) - 既存リソース使用時の設定
-- [DEVELOPMENT.md](DEVELOPMENT.md) - 開発環境のセットアップ
-- [TESTING.md](TESTING.md) - テスト実行方法
-
-### 🚀 クイックスタート
-
-#### 既存のAzureリソースがある場合:
-1. [ハンズオンガイド](HANDS-ON-GUIDE.md)に従って設定を更新
-2. CI/CDパイプラインを実行
-3. アプリケーションの動作を確認
-
-#### 新規でリソースを作成する場合:
-Deploy to Azure using Azure Developer CLI:
+### Azure Developer CLI を使用
 
 ```bash
+# Azure にログイン
 azd auth login
-azd init
+
+# プロビジョニングとデプロイ
 azd up
+
+# 既存リソースへのデプロイのみ
+azd deploy
 ```
 
-## Configuration
+### 手動デプロイ
 
-### Main Application Configuration
+1. Azure リソースのプロビジョニング:
+   ```bash
+   az deployment sub create \
+     --location japaneast \
+     --template-file infra/main.bicep \
+     --parameters infra/main.parameters.json
+   ```
 
-Configure the application using environment variables in `.env`:
+2. アプリケーションのデプロイ:
+   ```bash
+   az webapp deployment source config-zip \
+     --resource-group rg-your-env-unified \
+     --name app-your-env-unified-xxxxx \
+     --src unified-app.zip
+   ```
 
-- `AZURE_OPENAI_ENDPOINT`: Your Azure OpenAI service endpoint
-- `AZURE_OPENAI_API_KEY`: API key for Azure OpenAI
-- `AZURE_OPENAI_DEPLOYMENT_NAME`: Deployment name for your model
-- Additional configuration options available in `.env.template`
+## 🔧 設定
 
-### Evaluation System Configuration
+### 環境変数
 
-For the evaluation system (`eval/` directory), create a separate `.env` file:
+| 変数名 | 説明 | デフォルト値 |
+|--------|------|-------------|
+| `PORT` | メインアプリケーションのポート | `8000` |
+| `CHAINLIT_PORT` | Chainlit のポート | `8501` |
+| `ENVIRONMENT` | 環境タイプ | `development` |
+| `PYTHONPATH` | Python パス | `/home/site/wwwroot/backend/src` |
+
+### Azure App Service 設定
+
+- **Python バージョン**: 3.11
+- **起動コマンド**: `bash startup.sh`
+- **Always On**: 有効
+- **HTTPS Only**: 有効
+
+## 📊 監視とログ
+
+- **Application Insights**: 自動的に設定されます
+- **Log Analytics**: すべてのログが収集されます
+- **ヘルスチェック**: `/health` エンドポイントで確認
+
+## 🔒 セキュリティ
+
+- **Managed Identity**: Azure リソースへの認証に使用
+- **Key Vault**: シークレット管理
+- **HTTPS**: 強制有効
+- **RBAC**: Role-Based Access Control
+
+## ⚡ パフォーマンス
+
+- **App Service Plan**: B2 (Basic tier)
+- **Auto Scale**: 必要に応じて設定可能
+- **CDN**: 静的コンテンツ配信（オプション）
+
+## 🐛 トラブルシューティング
+
+### よくある問題
+
+1. **Chainlit が起動しない**
+   - ログを確認: `az webapp log tail`
+   - ポート競合の確認
+   - Python 依存関係の確認
+
+2. **プロキシエラー**
+   - 内部通信の確認
+   - ファイアウォール設定
+
+3. **メモリ不足**
+   - App Service Plan のスケールアップ
+   - 不要なプロセスの停止
+
+### ログの確認
 
 ```bash
-# Navigate to eval directory
-cd eval
+# リアルタイムログ
+az webapp log tail --resource-group rg-your-env-unified --name app-your-env-unified-xxxxx
 
-# Copy the example environment file
-cp .env.example .env
-
-# Edit .env with your configuration
+# Application Insights でのログ分析
+az monitor app-insights query --app your-app-insights --analytics-query "traces | limit 100"
 ```
 
-**Required variables for evaluation system:**
-- `AZURE_SEARCH_ENDPOINT`: Azure AI Search service endpoint
-- `AZURE_SEARCH_INDEX_NAME`: Search index name
-- `AZURE_OPENAI_ENDPOINT`: Azure OpenAI endpoint (same as main app)
-- `AZURE_OPENAI_DEPLOYMENT_NAME`: Model deployment name
-- `USE_MANAGED_IDENTITY`: Set to `true` for Azure-hosted deployment
+## 🔄 従来構成からの移行
 
-**Security Best Practices:**
-1. Never commit `.env` files to version control
-2. Use Azure Key Vault for production secrets
-3. Enable Managed Identity when deploying to Azure
-4. Rotate API keys regularly
-5. Use different configurations for development, staging, and production
+### 移行手順
 
-**Troubleshooting Environment Variables:**
-- Check if `.env` file exists in the correct directory
-- Verify environment variable names match exactly (case-sensitive)
-- Ensure no trailing spaces in variable values
-- Use quotes for values containing special characters
-- Check Azure resource permissions if using Managed Identity
+1. **統合アプリのテスト**: ローカルで動作確認
+2. **Azure リソース作成**: 新しいリソースグループに作成
+3. **データ移行**: 必要に応じてKey Vaultシークレットをコピー
+4. **DNS更新**: 新しいエンドポイントに更新
+5. **旧リソース削除**: 確認後に削除
 
-## Documentation
+### 利点
 
-- **[Architecture Overview](./ARCHITECTURE.md)**: System design and technical architecture
-- **[API Documentation](./API.md)**: Detailed API endpoint documentation
-- **[Development Guide](./DEVELOPMENT.md)**: Comprehensive development setup and guidelines
-- **[Deployment Guide](./DEPLOYMENT.md)**: Complete deployment instructions for various environments
-- **[Testing Guide](./TESTING.md)**: Testing strategy, red team testing, and quality assurance
-- **[Changelog](./CHANGELOG.md)**: Version history and release notes
-- **[Support](./SUPPORT.md)**: How to get help and file issues
-- **[Security](./SECURITY.md)**: Security reporting and guidelines
+- **コスト削減**: 1つのApp Serviceで運用
+- **管理簡素化**: 単一のデプロイメント
+- **パフォーマンス向上**: 内部通信の高速化
 
-## Agent Capabilities
+## 📝 ライセンス
 
-The system includes specialized agents for different scenarios:
-
-- **Triage Agent**: Intelligent request routing and classification
-- **Technical Support Agent**: General Azure troubleshooting and guidance
-- **Escalation Agent**: Complex issue handling and expert consultation
-- **Foundry Technical Support Agent**: Azure AI Foundry specific support
-
-## Security Features
-
-- Enterprise-grade security with Azure AD integration
-- Secure credential management and environment configuration
-- OpenTelemetry observability for monitoring and compliance
-- Following Microsoft security best practices
-
-## Contributing
-
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
-Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
-the rights to use your contribution. For details, visit [Contributor License Agreements](https://cla.opensource.microsoft.com).
-
-When you submit a pull request, a CLA bot will automatically determine whether you need to provide
-a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
-provided by the bot. You will only need to do this once across all repos using our CLA.
-
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
-For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
-contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
-
-## Trademarks
-
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
-trademarks or logos is subject to and must follow
-[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/legal/intellectualproperty/trademarks/usage/general).
-Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
-Any use of third-party trademarks or logos are subject to those third-party's policies.
+MIT License - 詳細は [LICENSE](../LICENSE) ファイルを参照してください。

@@ -32,17 +32,30 @@ echo "📂 Directory structure:"
 ls -la
 
 # Gunicorn を使用してアプリケーションを起動
-echo "🎯 Starting application with Gunicorn..."
+echo "🎯 Starting application with Gunicorn and UvicornWorker..."
 
-exec gunicorn app:app \
-    --bind 0.0.0.0:$PORT \
-    --workers 1 \
-    --worker-class uvicorn.workers.UvicornWorker \
-    --timeout 120 \
-    --keepalive 5 \
-    --max-requests 1000 \
-    --max-requests-jitter 100 \
-    --access-logfile - \
-    --error-logfile - \
-    --log-level info \
-    --capture-output
+# UvicornWorkerが利用できない場合の fallback
+if python -c "import uvicorn.workers" 2>/dev/null; then
+    echo "✅ UvicornWorker is available"
+    exec gunicorn app:app \
+        --bind 0.0.0.0:$PORT \
+        --workers 1 \
+        --worker-class uvicorn.workers.UvicornWorker \
+        --timeout 120 \
+        --keepalive 5 \
+        --max-requests 1000 \
+        --max-requests-jitter 100 \
+        --access-logfile - \
+        --error-logfile - \
+        --log-level info \
+        --capture-output
+else
+    echo "⚠️  UvicornWorker not available, using uvicorn directly"
+    exec uvicorn app:app \
+        --host 0.0.0.0 \
+        --port $PORT \
+        --workers 1 \
+        --timeout-keep-alive 5 \
+        --access-log \
+        --log-level info
+fi

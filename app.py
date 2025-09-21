@@ -162,19 +162,19 @@ class ProxyMiddleware(BaseHTTPMiddleware):
         try:
             logger.info(f"🔄 Proxying {request.method} {path} to Chainlit")
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 # リクエストURLを構築
                 url = f"{self.chainlit_url}{path}"
                 if request.url.query:
                     url += f"?{request.url.query}"
                 
-                # ヘッダーを処理（問題のあるヘッダーを除外）
+                # ヘッダーを処理
                 headers = {}
                 for key, value in request.headers.items():
                     if key.lower() not in ['host', 'content-length', 'transfer-encoding', 'connection']:
                         headers[key] = value
                 
-                # リクエストをプロキシ
+                # リクエストをプロキシ（httpxは自動的にgzipを処理）
                 response = await client.request(
                     method=request.method,
                     url=url,
@@ -184,12 +184,13 @@ class ProxyMiddleware(BaseHTTPMiddleware):
                 
                 logger.info(f"✅ Chainlit responded with status {response.status_code}")
                 
-                # レスポンスヘッダーを処理
+                # レスポンスヘッダーを処理（content-encodingとcontent-lengthを除外）
                 response_headers = {}
                 for key, value in response.headers.items():
-                    if key.lower() not in ['content-length', 'transfer-encoding', 'connection']:
+                    if key.lower() not in ['content-length', 'transfer-encoding', 'connection', 'content-encoding']:
                         response_headers[key] = value
                 
+                # response.contentは自動的に解凍されたコンテンツを返す
                 return Response(
                     content=response.content,
                     status_code=response.status_code,
@@ -458,17 +459,17 @@ async def test_proxy():
     """プロキシ機能のテスト"""
     try:
         # ProxyMiddlewareを通さずに直接プロキシをテスト
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            # Chainlitのルートページを取得
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            # Chainlitのルートページを取得（gzipは自動処理される）
             response = await client.get(f"http://localhost:{CHAINLIT_PORT}/")
             
             # レスポンスヘッダーを処理
             headers = {}
             for key, value in response.headers.items():
-                if key.lower() not in ['content-length', 'transfer-encoding', 'connection']:
+                if key.lower() not in ['content-length', 'transfer-encoding', 'connection', 'content-encoding']:
                     headers[key] = value
             
-            # HTMLレスポンスを返す
+            # HTMLレスポンスを返す（response.textは自動的に解凍されたテキスト）
             return HTMLResponse(
                 content=response.text,
                 status_code=response.status_code,

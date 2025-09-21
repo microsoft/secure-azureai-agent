@@ -37,7 +37,7 @@ sys.path.insert(0, str(BACKEND_DIR / "src"))
 
 # バックエンドアプリをインポート
 try:
-    from backend.src.main import app as backend_app
+    from backend.src.main import app as backend_app, startup_event as backend_startup_event
     logger.info("✅ Backend app imported successfully")
 except ImportError as e:
     logger.error(f"❌ Failed to import backend app: {e}")
@@ -123,11 +123,12 @@ class ProxyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         
-        # バックエンド API のパスはそのまま処理
+        # バックエンド API のパスとチャットストリームはそのまま処理
         if (path.startswith("/api/") or 
             path.startswith("/health") or 
             path.startswith("/docs") or 
-            path.startswith("/openapi.json")):
+            path.startswith("/openapi.json") or
+            path == "/chat/stream"):  # チャットストリームエンドポイントを追加
             return await call_next(request)
         
         # WebSocket接続は特別に処理（ミドルウェアでは処理できないため、別途ルートで処理）
@@ -217,10 +218,15 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Starting unified application")
     try:
+        # 明示的にバックエンドの初期化を呼び出す
+        logger.info("🔧 Initializing backend services...")
+        await backend_startup_event()
+        logger.info("✅ Backend services initialized")
+        
         await chainlit_manager.start_chainlit()
         logger.info("✅ Unified application started successfully")
     except Exception as e:
-        logger.error(f"❌ Failed to start Chainlit: {e}")
+        logger.error(f"❌ Failed to start services: {e}")
         # Chainlit が起動しなくても、バックエンド API は使用可能
     
     yield
@@ -242,6 +248,50 @@ app.mount("/api", backend_app)
 
 # プロキシミドルウェアを追加
 app.add_middleware(ProxyMiddleware, chainlit_manager=chainlit_manager)
+
+# チャットストリームエンドポイントを直接追加（バックエンドAPIへのプロキシ）
+@app.post("/chat/stream")
+async def chat_stream_proxy(request: Request):
+    """チャットストリームをバックエンドAPIにプロキシ"""
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # リクエストボディを取得
+            body = await request.body()
+            
+            # バックエンドAPIに転送
+            async with client.stream(
+                "POST",
+                f"http://localhost:{PORT}/api/chat/stream",
+                content=body,
+                headers={"Content-Type": "application/json", "Accept": "text/event-stream"}
+            ) as response:
+                response.raise_for_status()
+                
+                # ストリーミングレスポンスを返す
+                async def generate():
+                    try:
+                        async for chunk in response.aiter_bytes():
+                            yield chunk
+                    except httpx.StreamClosed:
+                        # ストリームが閉じられた場合は静かに終了
+                        logger.debug("Stream was closed by client or server")
+                        return
+                    except Exception as e:
+                        # その他のエラーはログに記録
+                        logger.warning(f"Stream error: {e}")
+                        return
+                
+                return StreamingResponse(
+                    generate(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                    }
+                )
+    except Exception as e:
+        logger.error(f"❌ Chat stream proxy error: {e}")
+        raise HTTPException(status_code=502, detail=f"Backend API error: {str(e)}")
 
 # ヘルスチェックエンドポイント
 @app.get("/health")

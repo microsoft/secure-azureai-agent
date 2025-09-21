@@ -30,7 +30,7 @@ class BackendAPIClient:
                 
                 async with client.stream(
                     "POST",
-                    f"{self.base_url}/chat/stream",
+                    f"{self.base_url}/api/chat/stream",
                     json=payload,
                     headers={"Accept": "text/event-stream"}
                 ) as response:

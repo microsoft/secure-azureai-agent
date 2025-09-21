@@ -465,19 +465,73 @@ class AzureTroubleshootAgent:
                 if thread is None:
                     thread = ChatHistoryAgentThread()
                 
+                # Check if we have a properly initialized triage agent
+                if not self.triage_agent:
+                    error_msg = "🔒 Agent not initialized properly"
+                    logger.error(error_msg)
+                    yield {
+                        "content": error_msg,
+                        "session_id": session_id,
+                        "is_done": True
+                    }
+                    return
+                
                 # Stream the response through triage agent
                 # NOTE: During streaming, no log recording is performed to prioritize responsiveness
-                async for response in self.triage_agent.invoke_stream(messages=message, thread=thread):
-                    if response.content:
-                        # During streaming, return only content without log recording
-                        yield {
-                            "content": str(response.content),
-                            "session_id": session_id,
-                            "is_done": False
-                        }
+                logger.info(f"Streaming response for session {session_id}")
+                response_received = False
+                
+                try:
+                    async for response in self.triage_agent.invoke_stream(thread=thread, messages=message):
+                        logger.debug(f"Received response chunk: {type(response)}")
+                        response_received = True
+                        
+                        if hasattr(response, 'content') and response.content:
+                            content = str(response.content)
+                            logger.debug(f"Sending content: {content[:100]}...")
+                            # During streaming, return only content without log recording
+                            yield {
+                                "content": content,
+                                "session_id": session_id,
+                                "is_done": False
+                            }
+                        
+                        # Update thread state for final logging
+                        if hasattr(response, 'thread'):
+                            thread = response.thread
                     
-                    # Update thread state for final logging
-                    thread = response.thread
+                    # If no response was received, try a fallback approach
+                    if not response_received:
+                        logger.warning("No response received from invoke_stream, trying fallback")
+                        try:
+                            # Fallback to regular invoke method
+                            response = await self.triage_agent.invoke(thread=thread, messages=message)
+                            if hasattr(response, 'content') and response.content:
+                                content = str(response.content)
+                                yield {
+                                    "content": content,
+                                    "session_id": session_id,
+                                    "is_done": False
+                                }
+                            if hasattr(response, 'thread'):
+                                thread = response.thread
+                        except Exception as fallback_e:
+                            logger.error(f"Fallback method also failed: {fallback_e}")
+                            yield {
+                                "content": f"申し訳ございませんが、現在応答を生成できません。詳細: {str(fallback_e)}",
+                                "session_id": session_id,
+                                "is_done": True
+                            }
+                            return
+                
+                except Exception as stream_e:
+                    logger.error(f"Error in streaming: {stream_e}")
+                    yield {
+                        "content": f"ストリーミング中にエラーが発生しました: {str(stream_e)}",
+                        "session_id": session_id,
+                        "is_done": True
+                    }
+                    return
                 
                 # Post-streaming processing: session storage and log recording
                 # Store the final thread state

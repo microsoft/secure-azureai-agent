@@ -135,8 +135,14 @@ class ProxyMiddleware(BaseHTTPMiddleware):
             path == "/chat/stream"):
             return await call_next(request)
         
-        # WebSocket接続は特別に処理
-        if path.startswith("/ws") or path.startswith("/chat/ws") or "websocket" in request.headers.get("upgrade", "").lower():
+        # WebSocket接続は特別に処理（Socket.IOのパスを含む）
+        if (path.startswith("/ws") or 
+            path.startswith("/chat/ws") or 
+            path.startswith("/socket.io") or  # Socket.IOのパスを追加
+            "websocket" in request.headers.get("upgrade", "").lower()):
+            # Socket.IOのポーリングリクエストもプロキシする必要がある
+            if path.startswith("/ws/socket.io/"):
+                return await self.proxy_to_chainlit(request)
             return await call_next(request)
         
         # Chainlit が起動していない場合はエラーページを表示
@@ -159,6 +165,12 @@ class ProxyMiddleware(BaseHTTPMiddleware):
             )
         
         # その他のリクエストは Chainlit にプロキシ
+        return await self.proxy_to_chainlit(request)
+    
+    async def proxy_to_chainlit(self, request: Request):
+        """Chainlitへのプロキシ処理を共通化"""
+        path = request.url.path
+        
         try:
             logger.info(f"🔄 Proxying {request.method} {path} to Chainlit")
             
@@ -318,9 +330,9 @@ async def health_check():
         "chainlit_port": CHAINLIT_PORT
     }
 
-# WebSocket プロキシエンドポイント
+# WebSocket プロキシエンドポイント（Socket.IOのパスにも対応）
 @app.websocket("/ws/{path:path}")
-async def websocket_proxy(websocket: WebSocket, path: str):
+async def websocket_proxy(websocket: WebSocket, path: str = ""):
     """WebSocket 接続を Chainlit にプロキシ"""
     if not chainlit_manager.is_running:
         await websocket.close(code=1001, reason="Service is starting")
@@ -360,18 +372,18 @@ async def websocket_proxy(websocket: WebSocket, path: str):
         logger.error(f"WebSocket proxy error: {e}")
         await websocket.close(code=1011, reason="Internal error")
 
-# Chainlit の WebSocket エンドポイント用
-@app.websocket("/chat/ws")
-async def chat_websocket_proxy(websocket: WebSocket):
-    """Chat WebSocket を Chainlit にプロキシ"""
+# Socket.IO WebSocket エンドポイント用
+@app.websocket("/socket.io/")
+async def socketio_websocket_proxy(websocket: WebSocket):
+    """Socket.IO WebSocket を Chainlit にプロキシ"""
     if not chainlit_manager.is_running:
         await websocket.close(code=1001, reason="Service is starting")
         return
     
     await websocket.accept()
     
-    # Chainlit WebSocket URL
-    chainlit_ws_url = f"ws://localhost:{CHAINLIT_PORT}/chat/ws"
+    # Chainlit Socket.IO WebSocket URL
+    chainlit_ws_url = f"ws://localhost:{CHAINLIT_PORT}/socket.io/"
     
     try:
         async with websockets.connect(chainlit_ws_url) as chainlit_ws:
@@ -399,7 +411,7 @@ async def chat_websocket_proxy(websocket: WebSocket):
             )
             
     except Exception as e:
-        logger.error(f"Chat WebSocket proxy error: {e}")
+        logger.error(f"Socket.IO WebSocket proxy error: {e}")
         await websocket.close(code=1011, reason="Internal error")
 
 # シグナルハンドラー

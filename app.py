@@ -123,15 +123,19 @@ class ProxyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         
+        # デバッグログを追加
+        logger.debug(f"🔍 Incoming request: {request.method} {path}")
+        
         # バックエンド API のパスとチャットストリームはそのまま処理
         if (path.startswith("/api/") or 
             path.startswith("/health") or 
             path.startswith("/docs") or 
             path.startswith("/openapi.json") or
-            path == "/chat/stream"):  # チャットストリームエンドポイントを追加
+            path.startswith("/test-") or  # テストエンドポイントを追加
+            path == "/chat/stream"):
             return await call_next(request)
         
-        # WebSocket接続は特別に処理（ミドルウェアでは処理できないため、別途ルートで処理）
+        # WebSocket接続は特別に処理
         if path.startswith("/ws") or path.startswith("/chat/ws") or "websocket" in request.headers.get("upgrade", "").lower():
             return await call_next(request)
         
@@ -140,15 +144,14 @@ class ProxyMiddleware(BaseHTTPMiddleware):
             return HTMLResponse(
                 content="""
                 <html>
-                    <head><title>Service Starting</title></head>
-                    <body>
+                    <head>
+                        <title>Service Starting</title>
+                        <meta http-equiv="refresh" content="5">
+                    </head>
+                    <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
                         <h1>🚀 Service is Starting</h1>
                         <p>Please wait while the frontend service is loading...</p>
-                        <script>
-                            setTimeout(function() {
-                                window.location.reload();
-                            }, 5000);
-                        </script>
+                        <p>Page will refresh automatically in 5 seconds.</p>
                     </body>
                 </html>
                 """,
@@ -157,57 +160,66 @@ class ProxyMiddleware(BaseHTTPMiddleware):
         
         # その他のリクエストは Chainlit にプロキシ
         try:
+            logger.info(f"🔄 Proxying {request.method} {path} to Chainlit")
+            
             async with httpx.AsyncClient(timeout=30.0) as client:
                 # リクエストURLを構築
                 url = f"{self.chainlit_url}{path}"
                 if request.url.query:
                     url += f"?{request.url.query}"
                 
+                # ヘッダーを処理（問題のあるヘッダーを除外）
+                headers = {}
+                for key, value in request.headers.items():
+                    if key.lower() not in ['host', 'content-length', 'transfer-encoding', 'connection']:
+                        headers[key] = value
+                
                 # リクエストをプロキシ
                 response = await client.request(
                     method=request.method,
                     url=url,
-                    headers=dict(request.headers),
+                    headers=headers,
                     content=await request.body()
                 )
                 
-                # レスポンスヘッダーを適切に処理
-                headers = dict(response.headers)
+                logger.info(f"✅ Chainlit responded with status {response.status_code}")
                 
-                # Content-Length ヘッダーを削除して自動計算させる
-                headers.pop("content-length", None)
-                headers.pop("transfer-encoding", None)
+                # レスポンスヘッダーを処理
+                response_headers = {}
+                for key, value in response.headers.items():
+                    if key.lower() not in ['content-length', 'transfer-encoding', 'connection']:
+                        response_headers[key] = value
                 
-                # WebSocketの場合は特別な処理が必要だが、今回は簡略化
                 return Response(
                     content=response.content,
                     status_code=response.status_code,
-                    headers=headers,
+                    headers=response_headers,
                     media_type=response.headers.get("content-type")
                 )
                 
-        except httpx.ConnectError:
-            logger.warning("⚠️ Cannot connect to Chainlit, showing error page")
+        except httpx.ConnectError as e:
+            logger.warning(f"⚠️ Cannot connect to Chainlit: {e}")
             return HTMLResponse(
                 content="""
                 <html>
-                    <head><title>Frontend Unavailable</title></head>
-                    <body>
+                    <head>
+                        <title>Frontend Unavailable</title>
+                        <meta http-equiv="refresh" content="10">
+                    </head>
+                    <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
                         <h1>⚠️ Frontend Service Unavailable</h1>
                         <p>The frontend service is temporarily unavailable. Please try again in a moment.</p>
-                        <script>
-                            setTimeout(function() {
-                                window.location.reload();
-                            }, 10000);
-                        </script>
+                        <p>Page will refresh automatically in 10 seconds.</p>
+                        <hr>
+                        <p><a href="/health">Check Health Status</a></p>
                     </body>
                 </html>
                 """,
                 status_code=503
             )
         except Exception as e:
-            logger.error(f"❌ Proxy error: {e}")
-            raise HTTPException(status_code=502, detail="Proxy error")
+            logger.error(f"❌ Proxy error: {type(e).__name__}: {e}")
+            raise HTTPException(status_code=502, detail=f"Proxy error: {str(e)}")
 
 # Chainlit マネージャーのインスタンス
 chainlit_manager = ChainlitManager()
@@ -418,3 +430,52 @@ if __name__ == "__main__":
     finally:
         chainlit_manager.stop_chainlit()
         logger.info("✅ Application shutdown complete")
+
+# デバッグ用エンドポイントを追加（ヘルスチェックの後に追加）
+@app.get("/test-chainlit")
+async def test_chainlit():
+    """Chainlit接続テスト"""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"http://localhost:{CHAINLIT_PORT}/")
+            return {
+                "chainlit_status": "accessible",
+                "status_code": response.status_code,
+                "content_type": response.headers.get("content-type"),
+                "content_length": len(response.content),
+                "headers": dict(response.headers),
+                "content_preview": response.text[:500] + "..." if len(response.text) > 500 else response.text
+            }
+    except Exception as e:
+        return {
+            "chainlit_status": "error",
+            "error": str(e),
+            "type": type(e).__name__
+        }
+
+@app.get("/test-proxy")
+async def test_proxy():
+    """プロキシ機能のテスト"""
+    try:
+        # ProxyMiddlewareを通さずに直接プロキシをテスト
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Chainlitのルートページを取得
+            response = await client.get(f"http://localhost:{CHAINLIT_PORT}/")
+            
+            # レスポンスヘッダーを処理
+            headers = {}
+            for key, value in response.headers.items():
+                if key.lower() not in ['content-length', 'transfer-encoding', 'connection']:
+                    headers[key] = value
+            
+            # HTMLレスポンスを返す
+            return HTMLResponse(
+                content=response.text,
+                status_code=response.status_code,
+                headers=headers
+            )
+    except Exception as e:
+        return HTMLResponse(
+            content=f"<html><body><h1>Proxy Test Failed</h1><p>Error: {str(e)}</p></body></html>",
+            status_code=500
+        )

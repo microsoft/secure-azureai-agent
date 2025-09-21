@@ -305,12 +305,6 @@ async def health_check():
         "chainlit_port": CHAINLIT_PORT
     }
 
-# ルートパスの処理
-@app.get("/")
-async def root():
-    """ルートパスは Chainlit にリダイレクト"""
-    return RedirectResponse(url="/", status_code=302)
-
 # WebSocket プロキシエンドポイント
 @app.websocket("/ws/{path:path}")
 async def websocket_proxy(websocket: WebSocket, path: str):

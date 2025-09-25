@@ -2,6 +2,22 @@
 
 This module provides a comprehensive evaluation system for RAG (Retrieval Augmented Generation) systems built with Azure AI Search and Azure OpenAI, using the RAGAS evaluation framework.
 
+## Sample Data
+
+The project includes sample data for demonstrating and testing the RAG system:
+
+- **ContosoTelecom社内資料.pdf**: A fictional Japanese corporate document containing:
+  - Product and service information for Contoso Telecom
+  - Technical support procedures and troubleshooting guides  
+  - Internal policies and procedures
+  - Sample content designed for RAG search and Q&A testing
+
+This sample document is located at the project root and serves as test data for evaluating:
+- Document indexing and chunking strategies
+- Semantic search accuracy
+- Japanese language processing capabilities
+- Q&A generation and evaluation
+
 ## Features
 
 - **Secure Authentication**: Uses Azure Managed Identity for credential management
@@ -137,6 +153,49 @@ async def evaluate_rag():
     print(f"Avg Context Precision: {summary.avg_context_precision:.3f}")
 
 asyncio.run(evaluate_rag())
+```
+
+### Using Sample Data for Evaluation
+
+```python
+import asyncio
+from config import AzureConfig, EvaluationConfig, setup_logging
+from azure_rag import AzureSearchRAGSystem
+from rag_evaluation import RAGEvaluationSystem
+
+async def evaluate_contoso_data():
+    # Setup
+    setup_logging()
+    azure_config = AzureConfig.from_environment()
+    eval_config = EvaluationConfig.from_environment()
+    
+    # Initialize systems
+    rag_system = AzureSearchRAGSystem(azure_config)
+    evaluator = RAGEvaluationSystem(rag_system, eval_config)
+    
+    # Sample queries based on ContosoTelecom sample data
+    queries = [
+        "ContosoTelecomのサポート体制について教えてください",
+        "技術的な問題が発生した場合の対処手順は？",
+        "製品保証ポリシーの詳細を教えてください",
+        "新規顧客向けのサービス紹介をお願いします"
+    ]
+    
+    # Run evaluation with Japanese sample data
+    results, summary = await evaluator.full_evaluation(
+        queries=queries,
+        output_file="contoso_evaluation_results.json",
+        top_k=5,
+        search_type="hybrid"
+    )
+    
+    # Print results
+    print(f"ContosoTelecom Data Evaluation Summary:")
+    print(f"Total queries: {summary.total_queries}")
+    print(f"Avg Faithfulness: {summary.avg_faithfulness:.3f}")
+    print(f"Avg Answer Relevancy: {summary.avg_answer_relevancy:.3f}")
+
+asyncio.run(evaluate_contoso_data())
 ```
 
 ### Batch Evaluation

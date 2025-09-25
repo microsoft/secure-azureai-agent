@@ -4,6 +4,8 @@ from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
 from semantic_kernel.agents import ChatCompletionAgent, ChatHistoryAgentThread, AzureAIAgent, AzureAIAgentSettings
 from semantic_kernel.filters import FunctionInvocationContext
 from azure.identity.aio import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
+from azure.ai.agents.models import ListSortOrder
 from typing import Optional, Dict, Any, AsyncGenerator
 import uuid
 import logging
@@ -30,6 +32,60 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+class TraceCollector:
+    """Collects and formats trace information for agent operations"""
+    
+    def __init__(self):
+        self.operations = []
+        self.function_calls = []
+        self.current_operation = None
+        
+    def start_operation(self, operation_name: str, context: Dict[str, Any] = None):
+        """Start tracking an operation"""
+        self.current_operation = {
+            "name": operation_name,
+            "start_time": datetime.datetime.now(),
+            "context": context or {},
+            "completed": False
+        }
+        
+    def complete_operation(self, operation_name: str, result: Dict[str, Any] = None):
+        """Complete an operation"""
+        if self.current_operation and self.current_operation["name"] == operation_name:
+            self.current_operation.update({
+                "end_time": datetime.datetime.now(),
+                "result": result or {},
+                "completed": True
+            })
+            self.operations.append(self.current_operation.copy())
+            self.current_operation = None
+            
+    def record_function_call(self, function_name: str, arguments: Dict[str, Any], result: Any = None):
+        """Record a function call"""
+        self.function_calls.append({
+            "function": function_name,
+            "arguments": arguments,
+            "result": result,
+            "timestamp": datetime.datetime.now()
+        })
+        
+    def get_current_trace(self) -> Dict[str, Any]:
+        """Get current trace information"""
+        trace_info = {}
+        
+        if self.function_calls:
+            trace_info["function_calls"] = self.function_calls[-5:]  # Last 5 calls
+            
+        if self.operations:
+            completed_ops = [op for op in self.operations if op["completed"]]
+            if completed_ops:
+                trace_info["operations"] = completed_ops[-3:]  # Last 3 operations
+                
+        if self.current_operation:
+            trace_info["current_operation"] = self.current_operation
+            
+        return trace_info if trace_info else None
+
 class AzureTroubleshootAgent:
     """Azure troubleshooting multi-agent system using Semantic Kernel"""
     
@@ -47,12 +103,30 @@ class AzureTroubleshootAgent:
     @staticmethod
     async def function_invocation_filter(context: FunctionInvocationContext, next):
         """A filter that will be called for each function call in the response."""
+        # Get trace collector from session if available
+        trace_collector = getattr(context, '_trace_collector', None)
+        
         if "messages" not in context.arguments:
             await next(context)
             return
-        print(f"    Agent [{context.function.name}] called with messages: {context.arguments['messages']}")
+            
+        function_name = context.function.name
+        arguments = dict(context.arguments)
+        
+        print(f"    Agent [{function_name}] called with messages: {arguments.get('messages', 'N/A')}")
+        
+        # Record function call start
+        if trace_collector:
+            trace_collector.record_function_call(function_name, arguments)
+        
         await next(context)
-        print(f"    Response from agent [{context.function.name}]: {context.result.value}")
+        
+        result_preview = str(context.result.value)[:100] if context.result and context.result.value else "No result"
+        print(f"    Response from agent [{function_name}]: {result_preview}")
+        
+        # Update function call with result
+        if trace_collector and trace_collector.function_calls:
+            trace_collector.function_calls[-1]["result"] = result_preview
     
     async def initialize(self):
         """Initialize the multi-agent system"""
@@ -62,7 +136,7 @@ class AzureTroubleshootAgent:
                 api_key = get_secret_from_keyvault("AZURE_OPENAI_API_KEY")
                 endpoint = get_secret_from_keyvault("AZURE_OPENAI_ENDPOINT") or os.getenv("AZURE_OPENAI_ENDPOINT")
                 deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4")
-                project_endpoint = os.getenv("PROJECT_ENDPOINT")
+                project_endpoint = os.getenv("PROJECT_ENDPOINT") or os.getenv("AGENT_API_URL")  # PROJECT_ENDPOINTを優先、フォールバックでAGENT_API_URL
                 foundry_technical_support_agent_id = get_secret_from_keyvault("FOUNDARY_TECHNICAL_SUPPORT_AGENT_ID")
                 
                 # Check if agent mode is enabled (default: False for agentless mode)
@@ -92,77 +166,31 @@ class AzureTroubleshootAgent:
                 if use_azure_ai_agent:
                     logger.info("🤖 Azure AI Agent mode enabled - Initializing Azure AI Foundry agent")
                     try:
-                        self.creds = DefaultAzureCredential()
-                        self.client = AzureAIAgent.create_client(credential=self.creds, endpoint=project_endpoint)
-                        foundry_technical_support_agent_definition = await self.client.agents.get_agent(agent_id=foundry_technical_support_agent_id)
-                        self.foundry_technical_support_agent = AzureAIAgent(client=self.client, definition=foundry_technical_support_agent_definition)
+                        # Use AIProjectClient for proper Azure AI Agent integration
+                        from azure.identity import DefaultAzureCredential as SyncDefaultAzureCredential
+                        self.sync_creds = SyncDefaultAzureCredential()
+                        self.project_client = AIProjectClient(
+                            credential=self.sync_creds,
+                            endpoint=project_endpoint
+                        )
+                        
+                        # Get agent definition and initialize
+                        self.foundry_agent_def = self.project_client.agents.get_agent(foundry_technical_support_agent_id)
                         logger.info(f"✅ Azure AI Foundry agent initialized successfully - Project Endpoint: {project_endpoint}")
                         
-                        # Create Escalation Agent for agent mode
-                        self.escalation_agent = ChatCompletionAgent(
-                            service=self.ai_service,
-                            name="EscalationAgent", 
-                            instructions="""
-                            You are an agent specializing in escalation to human operators.
-                            
-                            Handle the following cases:
-                            - Complex issues that cannot be resolved by technical support
-                            - Billing and account-related issues
-                            - Cases requiring enterprise support
-                            - High-priority urgent issues
-                            - Cases requiring custom development or consulting
-                            
-                            Please provide users with the following information:
-                            1. Problem overview and background
-                            2. Appropriate support channels (Azure Portal, Microsoft Support, sales representatives, etc.)
-                            3. Information required for escalation
-                            4. Expected response time
-                            
-                            Maintain a kind and understanding approach, and guide users to receive appropriate support.
-                            """
-                        )
+                        # Store agent ID for later use
+                        self.foundry_agent_id = foundry_technical_support_agent_id
                         
-                        # Create plugin list for agent mode
-                        plugins = [self.foundry_technical_support_agent, self.escalation_agent]
-                        logger.info("🔌 Added Azure AI Foundry agent and Escalation agent to plugins")
-                        
-                        # Create Triage Agent (Orchestrator) for agent mode
-                        self.triage_agent = ChatCompletionAgent(
-                            service=self.ai_service,
-                            kernel=kernel,
-                            name="TriageAgent",
-                            instructions="""
-                            You are an orchestrator that evaluates user requests and routes them to the appropriate 
-                            specialized agent (Azure AI Foundry agent or EscalationAgent) to provide proper support.
-                            
-                            Analyze user requests and route them according to the following criteria:
-                            
-                            Route to Azure AI Foundry agent for:
-                            - Technical issues with Azure services
-                            - Configuration and setup questions
-                            - Error message resolution
-                            - Best practices consultation
-                            - Performance issue diagnosis
-                            
-                            Route to EscalationAgent for:
-                            - Billing and account-related issues
-                            - Highly complex technical issues requiring specialized expertise
-                            - SLA violations or emergency situations
-                            - Cases requiring enterprise-level support
-                            - Custom development consultations
-                            
-                            Provide complete and clear responses to users, including information from the appropriate agents.
-                            Ensure that the original user request has been fully processed.
-                            """,
-                            plugins=plugins,
-                        )
+                        # Mark that we have a valid AI Foundry setup
+                        self.has_foundry_agent = True
+                        logger.info("🎯 Using Azure AI Foundry agent directly via AIProjectClient")
                         
                     except Exception as e:
                         error_msg = f"❌ Azure AI Foundry initialization failed - This may be due to private endpoint restrictions or network connectivity issues. Project Endpoint: {project_endpoint}, Error: {str(e)}"
                         logger.error(error_msg)
                         # Fall back to agentless mode
                         use_azure_ai_agent = False
-                        self.foundry_technical_support_agent = None
+                        self.has_foundry_agent = False
                         logger.warning("⚠️ Falling back to agentless mode")
                 
                 if not use_azure_ai_agent:
@@ -195,7 +223,7 @@ class AzureTroubleshootAgent:
                     self.triage_agent = self.simple_ai_assistant
                     logger.info("🤖 Simple AI assistant initialized for agentless mode")
                 
-                mode = "with Azure AI Foundry agent" if use_azure_ai_agent else "in agentless mode with simple AI assistant"
+                mode = "with Azure AI Foundry agent (direct access)" if use_azure_ai_agent else "in agentless mode with simple AI assistant"
                 logger.info(f"✅ Azure Multi-Agent System initialized successfully {mode}")
                 
             except ConnectionError as e:
@@ -210,10 +238,18 @@ class AzureTroubleshootAgent:
         """Cleanup resources"""
         # Clear sessions
         self.sessions.clear()
+        
+        # Close AI Project Client if exists
+        if hasattr(self, "project_client") and self.project_client:
+            # AIProjectClient doesn't have async close, but we can clear the reference
+            self.project_client = None
+            
+        # Close old client if exists (backward compatibility)
         if hasattr(self, "client") and self.client:
             await self.client.close()
         if hasattr(self, "creds") and self.creds:
             await self.creds.close()
+            
         logger.info("Multi-agent system cleaned up")
     
     async def _log_thread_details(self, thread: ChatHistoryAgentThread, session_id: str):
@@ -446,18 +482,29 @@ class AzureTroubleshootAgent:
         except Exception as e:
             return {"error": f"Error getting thread summary: {str(e)}"}
     
-    async def process_message_stream(self, message: str, session_id: Optional[str] = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_message_stream(self, message: str, session_id: Optional[str] = None, mode: str = "chat", enable_trace: bool = False) -> AsyncGenerator[Dict[str, Any], None]:
         """Process a message through the multi-agent system and stream the response
+        
+        Args:
+            message: User message to process
+            session_id: Optional session identifier
+            mode: Execution mode - "chat" for simple chat, "agent" for full agent capabilities
+            enable_trace: Whether to include trace information in the response (agent mode only)
         
         Log and telemetry recording is executed after streaming is complete.
         During streaming, responsiveness is prioritized and no log recording is performed.
         """
         if session_id is None:
             session_id = str(uuid.uuid4())
-        
+
         with self.tracer.start_as_current_span("process_message_stream") as span:
             span.set_attribute("session_id", session_id)
             span.set_attribute("message_length", len(message))
+            span.set_attribute("mode", mode)
+            span.set_attribute("enable_trace", enable_trace)
+            
+            # Initialize trace collector for agent mode
+            trace_collector = TraceCollector() if enable_trace and mode == "agent" else None
             
             try:
                 # Get or create thread for this session
@@ -465,71 +512,186 @@ class AzureTroubleshootAgent:
                 if thread is None:
                     thread = ChatHistoryAgentThread()
                 
-                # Check if we have a properly initialized triage agent
-                if not self.triage_agent:
-                    error_msg = "🔒 Agent not initialized properly"
-                    logger.error(error_msg)
-                    yield {
-                        "content": error_msg,
-                        "session_id": session_id,
-                        "is_done": True
-                    }
-                    return
-                
-                # Stream the response through triage agent
-                # NOTE: During streaming, no log recording is performed to prioritize responsiveness
-                logger.info(f"Streaming response for session {session_id}")
-                response_received = False
-                
-                try:
-                    async for response in self.triage_agent.invoke_stream(thread=thread, messages=message):
-                        logger.debug(f"Received response chunk: {type(response)}")
-                        response_received = True
-                        
-                        if hasattr(response, 'content') and response.content:
-                            content = str(response.content)
-                            logger.debug(f"Sending content: {content[:100]}...")
-                            # During streaming, return only content without log recording
-                            yield {
-                                "content": content,
-                                "session_id": session_id,
-                                "is_done": False
-                            }
-                        
-                        # Update thread state for final logging
-                        if hasattr(response, 'thread'):
-                            thread = response.thread
+                # Route based on mode
+                if mode == "agent":
+                    # Full agent mode with multi-agent capabilities
                     
-                    # If no response was received, try a fallback approach
-                    if not response_received:
-                        logger.warning("No response received from invoke_stream, trying fallback")
-                        try:
-                            # Fallback to regular invoke method
-                            response = await self.triage_agent.invoke(thread=thread, messages=message)
+                    # Check if agent mode is enabled via environment variable
+                    use_azure_ai_agent = os.getenv("USE_AZURE_AI_AGENT", "false").lower() in ("true", "1", "yes", "on")
+                    if not use_azure_ai_agent:
+                        error_msg = """🤖 **エージェントモードが無効です**
+
+エージェントモードを使用するには、以下の設定が必要です：
+
+**環境変数の設定:**
+- `USE_AZURE_AI_AGENT=true` を設定してください
+- `PROJECT_ENDPOINT` - AI Foundryプロジェクトのエンドポイント
+- `FOUNDARY_TECHNICAL_SUPPORT_AGENT_ID` - FoundryエージェントID
+
+**現在の状況:**
+- エージェントモードフラグ: 無効 ❌
+- 基本のチャット機能は利用可能です 💬
+
+**対処方法:**
+1. システム管理者に環境変数の設定を依頼してください
+2. 設定後、アプリケーションを再起動してください
+3. または、チャットモードで基本的なAI機能をご利用ください
+
+詳細は管理者向けドキュメントをご確認ください。"""
+                        logger.warning(f"Agent mode requested but USE_AZURE_AI_AGENT flag is disabled for session {session_id}")
+                        yield {
+                            "content": error_msg,
+                            "session_id": session_id,
+                            "is_done": True,
+                            "mode": mode
+                        }
+                        return
+                    
+                    # Check if we have a properly initialized AI Foundry agent
+                    if not hasattr(self, 'has_foundry_agent') or not self.has_foundry_agent:
+                        error_msg = """🔒 **エージェントが初期化されていません**
+
+エージェント機能の初期化に問題があります。以下の可能性があります：
+
+**考えられる原因:**
+- AI Foundryプロジェクトとの接続エラー
+- エージェント設定の不備
+- ネットワーク接続の問題
+
+**対処方法:**
+1. チャットモードに切り替えて基本機能をご利用ください
+2. システム管理者にエージェント設定の確認を依頼してください
+3. しばらく時間をおいてから再度お試しください"""
+                        logger.error(error_msg)
+                        yield {
+                            "content": error_msg,
+                            "session_id": session_id,
+                            "is_done": True,
+                            "mode": mode
+                        }
+                        return
+                    
+                    # Use AI Project Client for agent communication
+                    logger.info(f"Processing in agent mode for session {session_id}")
+                    
+                    try:
+                        # Create a thread for this conversation
+                        ai_thread = self.project_client.agents.threads.create()
+                        logger.debug(f"Created AI thread: {ai_thread.id}")
+                        
+                        # Add user message to thread
+                        self.project_client.agents.messages.create(
+                            thread_id=ai_thread.id,
+                            role="user",
+                            content=message
+                        )
+                        
+                        # Run the agent
+                        run = self.project_client.agents.runs.create_and_process(
+                            thread_id=ai_thread.id,
+                            agent_id=self.foundry_agent_id
+                        )
+                        
+                        if run.status == "failed":
+                            error_msg = f"🤖 エージェント実行エラー: {run.last_error}"
+                            logger.error(error_msg)
+                            yield {
+                                "content": error_msg,
+                                "session_id": session_id,
+                                "is_done": True,
+                                "mode": mode
+                            }
+                            return
+                        
+                        # Get messages from thread
+                        messages = self.project_client.agents.messages.list(
+                            thread_id=ai_thread.id, 
+                            order=ListSortOrder.ASCENDING
+                        )
+                        
+                        # Stream agent response
+                        for msg in messages:
+                            if msg.role == "assistant" and msg.text_messages:
+                                content = msg.text_messages[-1].text.value
+                                yield {
+                                    "content": content,
+                                    "session_id": session_id,
+                                    "is_done": False,
+                                    "mode": mode
+                                }
+                                
+                    except Exception as agent_e:
+                        error_msg = f"🤖 エージェント通信エラー: {str(agent_e)}"
+                        logger.error(f"Agent communication error: {agent_e}")
+                        yield {
+                            "content": error_msg,
+                            "session_id": session_id,
+                            "is_done": True,
+                            "mode": mode
+                        }
+                        return
+                        
+                elif mode == "chat":
+                    # Simple chat mode using direct AI service
+                    logger.info(f"Processing in chat mode for session {session_id}")
+                    
+                    if not self.simple_ai_assistant:
+                        # Create a simple assistant if not available
+                        if not self.ai_service:
+                            error_msg = "🔒 Chat service not initialized"
+                            logger.error(error_msg)
+                            yield {
+                                "content": error_msg,
+                                "session_id": session_id,
+                                "is_done": True,
+                                "mode": mode
+                            }
+                            return
+                        
+                        self.simple_ai_assistant = ChatCompletionAgent(
+                            service=self.ai_service,
+                            name="SimpleAssistant",
+                            instructions="""
+                            You are a helpful AI assistant specializing in Azure and technical support.
+                            Provide clear, concise, and helpful responses to user questions.
+                            Focus on practical solutions and best practices.
+                            If you don't know something, acknowledge it honestly and suggest where to find more information.
+                            """
+                        )
+                    
+                    try:
+                        async for response in self.simple_ai_assistant.invoke_stream(thread=thread, messages=message):
                             if hasattr(response, 'content') and response.content:
                                 content = str(response.content)
                                 yield {
                                     "content": content,
                                     "session_id": session_id,
-                                    "is_done": False
+                                    "is_done": False,
+                                    "mode": mode
                                 }
+                            
                             if hasattr(response, 'thread'):
                                 thread = response.thread
-                        except Exception as fallback_e:
-                            logger.error(f"Fallback method also failed: {fallback_e}")
-                            yield {
-                                "content": f"申し訳ございませんが、現在応答を生成できません。詳細: {str(fallback_e)}",
-                                "session_id": session_id,
-                                "is_done": True
-                            }
-                            return
+                                
+                    except Exception as chat_e:
+                        logger.error(f"Error in chat mode: {chat_e}")
+                        yield {
+                            "content": f"チャットモードでエラーが発生しました: {str(chat_e)}",
+                            "session_id": session_id,
+                            "is_done": True,
+                            "mode": mode
+                        }
+                        return
                 
-                except Exception as stream_e:
-                    logger.error(f"Error in streaming: {stream_e}")
+                else:
+                    # Invalid mode
+                    error_msg = f"無効なモード: {mode}. 'chat' または 'agent' を使用してください。"
+                    logger.error(error_msg)
                     yield {
-                        "content": f"ストリーミング中にエラーが発生しました: {str(stream_e)}",
+                        "content": error_msg,
                         "session_id": session_id,
-                        "is_done": True
+                        "is_done": True,
+                        "mode": mode
                     }
                     return
                 
@@ -540,12 +702,21 @@ class AzureTroubleshootAgent:
                 # Log thread details for debugging and telemetry (executed after streaming completion)
                 await self._log_thread_details(thread, session_id)
                 
-                # Send completion signal
-                yield {
+                # Send completion signal with trace information if available
+                completion_data = {
                     "content": "",
                     "session_id": session_id,
-                    "is_done": True
+                    "is_done": True,
+                    "mode": mode
                 }
+                
+                # Add final trace information if enabled
+                if trace_collector:
+                    final_trace = trace_collector.get_current_trace()
+                    if final_trace:
+                        completion_data["trace"] = final_trace
+                
+                yield completion_data
                 
             except ConnectionError as e:
                 # Network connectivity error (likely due to private endpoint restrictions)
@@ -555,7 +726,8 @@ class AzureTroubleshootAgent:
                 yield {
                     "content": error_msg,
                     "session_id": session_id,
-                    "is_done": True
+                    "is_done": True,
+                    "mode": mode
                 }
             except Exception as e:
                 # Check if the error is related to Azure OpenAI connectivity
@@ -563,6 +735,9 @@ class AzureTroubleshootAgent:
                 if any(keyword in error_str for keyword in ['connection', 'network', 'timeout', 'unreachable', 'forbidden', '403', '404', 'dns']):
                     error_msg = f"🔒 接続エラー: Azure OpenAIサービスへの接続に問題があります。これは閉域化設定やネットワーク制限が原因の可能性があります。システム管理者にネットワーク設定をご確認ください。詳細: {str(e)}"
                     logger.error(f"🔒 Potential network connectivity error in message stream: {e}")
+                elif mode == "agent" and any(keyword in error_str for keyword in ['agent', 'foundry', 'project']):
+                    error_msg = f"🤖 エージェントモードエラー: AI Foundryエージェントとの接続に問題があります。エージェント設定を確認してください。詳細: {str(e)}"
+                    logger.error(f"🤖 Agent mode error in message stream: {e}")
                 else:
                     error_msg = f"エラー: {str(e)}"
                     logger.error(f"❌ Error in message stream: {e}")
@@ -571,5 +746,6 @@ class AzureTroubleshootAgent:
                 yield {
                     "content": error_msg,
                     "session_id": session_id,
-                    "is_done": True
+                    "is_done": True,
+                    "mode": mode
                 }

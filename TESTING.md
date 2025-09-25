@@ -17,6 +17,10 @@ The project includes multiple types of testing to ensure reliability, security, 
 ```
 eval/
 ├── readteaming_test.ipynb    # Red team security testing
+├── rag_evaluation.py         # RAG system evaluation
+├── azure_rag.py             # RAG implementation testing
+├── sample_data.py           # Sample data generation
+├── ContosoTelecom社内資料.pdf # Sample test data
 ├── requirements.txt          # Testing dependencies
 └── test_reports/            # Generated test reports
 ```
@@ -122,6 +126,64 @@ red_team_result = await red_team_agent.scan(
     target=target_application,
     risk_categories=[RiskCategory.HARMFUL_CONTENT, RiskCategory.BIAS]
 )
+```
+
+## RAG System Testing
+
+### RAG Evaluation with Sample Data
+
+The project includes comprehensive RAG testing using the `ContosoTelecom社内資料.pdf` sample document:
+
+```python
+import asyncio
+from eval.config import AzureConfig, EvaluationConfig, setup_logging
+from eval.azure_rag import AzureSearchRAGSystem
+from eval.rag_evaluation import RAGEvaluationSystem
+
+@pytest.mark.asyncio
+async def test_rag_evaluation():
+    # Setup
+    setup_logging()
+    azure_config = AzureConfig.from_environment()
+    eval_config = EvaluationConfig.from_environment()
+    
+    # Initialize systems
+    rag_system = AzureSearchRAGSystem(azure_config)
+    evaluator = RAGEvaluationSystem(rag_system, eval_config)
+    
+    # Test queries based on sample data
+    test_queries = [
+        "ContosoTelecomのサービス内容について教えてください",
+        "技術サポートの連絡方法は？",
+        "製品の保証期間はどのくらいですか？"
+    ]
+    
+    # Run evaluation
+    results, summary = await evaluator.full_evaluation(
+        queries=test_queries,
+        output_file="test_rag_results.json"
+    )
+    
+    # Assertions
+    assert summary.total_queries == len(test_queries)
+    assert summary.avg_faithfulness > 0.7  # Minimum faithfulness threshold
+    assert summary.avg_answer_relevancy > 0.8  # Minimum relevancy threshold
+
+# Run RAG performance test
+async def test_rag_performance():
+    rag_system = AzureSearchRAGSystem(AzureConfig.from_environment())
+    
+    start_time = time.time()
+    response = await rag_system.process_rag_query(
+        query="ContosoTelecomの製品について教えてください",
+        top_k=5
+    )
+    end_time = time.time()
+    
+    # Performance assertions
+    assert (end_time - start_time) < 5.0  # Response under 5 seconds
+    assert len(response.contexts) > 0     # Retrieved contexts
+    assert len(response.answer) > 50      # Substantial answer
 ```
 
 ## Integration Testing

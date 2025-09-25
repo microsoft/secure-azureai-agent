@@ -1,13 +1,25 @@
 # 🚀 Secure Azure AI Agent
 
-Azure App Serviceで動作する統合AIエージェントアプリケーション。FastAPIバックエンドとChainlitフロントエンドを単一のApp Serviceで動作させる設計です。
+Azure App Serviceで動作する統合AIエージェントアプリケーション。FastAPIバックエンドとChainlitフロントエンドを単一のApp Serviceで動作させる設計です。チャットモードとAI Foundryエージェントモードの切り替えが可能で、エージェントのトレース機能も備えています。
 
 ![Azure](https://img.shields.io/badge/azure-%230072C6.svg?style=for-the-badge&logo=microsoftazure&logoColor=white)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)
 ![Chainlit](https://img.shields.io/badge/Chainlit-000000?style=for-the-badge&logo=chainlit&logoColor=white)
 
-## 🏗️ アーキテクチャ
+## ✨ 主要機能
+
+### 🤖 デュアルモードAI システム
+- **📝 チャットモード**: シンプルな会話型AIとして動作
+- **🚀 エージェントモード**: AI Foundryの高度なエージェント機能を活用
+- **⚙️ 簡単切り替え**: UIから即座にモード変更可能
+
+### 🔍 エージェント動作トレース
+- **ツール呼び出し**: エージェントが使用するツールの詳細表示
+- **思考プロセス**: AIの意思決定プロセスを可視化
+- **リアルタイム表示**: ストリーミング中のトレース情報配信
+
+### 🏗️ 統合アーキテクチャ
 
 ```
 統合アプリケーション (app.py)
@@ -38,6 +50,13 @@ secure-azureai-agent/
 │   ├── app.py           # Chainlit アプリケーション
 │   ├── chainlit.md      # UI 設定
 │   └── requirements.txt
+├── eval/                 # RAG評価・テストシステム
+│   ├── README_RAG_EVALUATION.md # RAG評価システムの詳細ガイド
+│   ├── rag_evaluation.py       # RAGAS評価フレームワーク
+│   ├── azure_rag.py           # Azure AI Search RAGシステム
+│   ├── config.py              # 設定管理
+│   └── sample_data.py         # サンプルデータ生成
+├── ContosoTelecom社内資料.pdf  # RAGデモ用サンプルデータ
 └── infra/                # Azure インフラストラクチャ
     ├── main.bicep       # メイン Bicep テンプレート
     ├── unified-resources.bicep  # リソース定義
@@ -103,16 +122,85 @@ azd deploy
 | **クラウド** | Azure App Service | - | ホスティング |
 | **インフラ** | Bicep | - | IaC |
 
-## 🔧 設定
+## 🧪 RAG評価システムとデモデータ
+
+このプロジェクトには、RAG（Retrieval Augmented Generation）システムの性能を評価するための包括的な評価システムが含まれています。
+
+### サンプルデータ
+
+- **`ContosoTelecom社内資料.pdf`**: RAGデモンストレーション用の架空の社内資料
+  - ContosoTelecom社の製品・サービス情報
+  - 技術サポート手順とトラブルシューティング
+  - 社内ポリシーと手順書
+  - RAG検索とQAのテスト用コンテンツ
+
+### RAG評価機能
+
+- **RAGAS評価フレームワーク**: Faithfulness, Answer Relevancy, Context Precisionなどの包括的メトリクス
+- **Azure AI Search統合**: ハイブリッド検索（セマンティック + キーワード）対応
+- **バッチ評価**: 複数クエリの並列処理
+- **結果エクスポート**: JSON/CSV形式での評価結果出力
+
+詳細については[eval/README_RAG_EVALUATION.md](eval/README_RAG_EVALUATION.md)を参照してください。
+
+## � 使い方
+
+### モード切り替え方法
+1. **設定ボタン**（⚙️）をクリック
+2. **実行モード**で「チャットモード」または「エージェントモード」を選択
+3. **トレース表示**を有効にしてエージェントの動作を詳細表示（エージェントモード時のみ）
+
+### チャットモードの特徴
+- 💬 シンプルで高速な会話型AI
+- 🎯 Azure関連の質問に特化
+- ⚡ 軽量で迅速な応答
+
+### エージェントモードの特徴  
+- 🤖 AI Foundryの高度なエージェント機能
+- 🔧 専門ツールを活用した詳細分析
+- 🔍 トレース機能でプロセス可視化
+- 📊 複雑な問題への対応
+
+### トレース機能の活用
+- **ツール呼び出し**: どのツールが使われたかを確認
+- **思考プロセス**: AIの判断理由を理解
+- **デバッグ**: 問題発生時の詳細調査
+
+## �🔧 設定
 
 ### 環境変数
 
+#### 基本設定
 | 変数名 | 説明 | デフォルト値 |
 |--------|------|-------------|
 | `PORT` | メインアプリケーションのポート | `8000` |
 | `CHAINLIT_PORT` | Chainlit のポート | `8501` |
 | `ENVIRONMENT` | 環境タイプ | `development` |
 | `PYTHONPATH` | Python パス | `/home/site/wwwroot/backend/src` |
+
+#### Azure OpenAI設定
+| 変数名 | 説明 | 必須 |
+|--------|------|------|
+| `AZURE_OPENAI_API_KEY` | Azure OpenAI APIキー | ✅ |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI エンドポイント | ✅ |
+| `AZURE_OPENAI_DEPLOYMENT_NAME` | デプロイメント名 | No (default: `gpt-4`) |
+
+#### AI Foundry エージェント設定
+| 変数名 | 説明 | 必須 |
+|--------|------|------|
+| `PROJECT_ENDPOINT` | AI Foundry プロジェクトエンドポイント | エージェントモード使用時 |
+| `FOUNDARY_TECHNICAL_SUPPORT_AGENT_ID` | Foundry技術サポートエージェントID | エージェントモード使用時 |
+
+#### モード制御
+| 変数名 | 説明 | デフォルト値 |
+|--------|------|-------------|
+| `USE_AZURE_AI_AGENT` | エージェントモードの有効化 | `false` |
+
+#### トレース・デバッグ設定
+| 変数名 | 説明 | デフォルト値 |
+|--------|------|-------------|
+| `SEMANTICKERNEL_EXPERIMENTAL_GENAI_ENABLE_OTEL_DIAGNOSTICS_SENSITIVE` | Semantic Kernelの詳細トレース | `false` |
+| `AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED` | AIコンテンツ記録 | `false` |
 
 ### Azure App Service 設定
 

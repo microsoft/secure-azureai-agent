@@ -7,7 +7,7 @@ from pydantic import BaseModel
 import uvicorn
 import os
 import sys
-from typing import List, Optional, AsyncGenerator
+from typing import List, Optional, AsyncGenerator, Dict
 import logging
 from dotenv import load_dotenv
 
@@ -77,11 +77,15 @@ async def add_security_headers(request, call_next):
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    mode: str = "chat"  # "chat" or "agent"
+    enable_trace: bool = False  # For agent mode tracing
 
 class StreamChatResponse(BaseModel):
     content: str
     session_id: str
     is_done: bool = False
+    mode: str = "chat"
+    trace: Optional[Dict] = None  # For agent trace information
 
 # Global agent instance
 agent = None
@@ -144,20 +148,27 @@ async def health_check():
 
 @app.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
-    """Stream chat response"""
+    """Stream chat response with mode selection"""
     if not agent:
         error_msg = "🔒 サービスが初期化されていません。Azure OpenAIサービスへの接続に問題がある可能性があります。これは閉域化設定（Private Endpoint）によるネットワーク制限が原因の可能性があります。システム管理者にネットワーク設定をご確認ください。"
         logger.error("Agent not initialized - possibly due to connectivity issues")
         raise HTTPException(status_code=500, detail=error_msg)
     
+    logger.info(f"Processing request with mode: {request.mode}, trace: {request.enable_trace}")
+    
     async def generate():
         try:
+            # Pass mode and trace settings to the agent
             async for chunk in agent.process_message_stream(
                 message=request.message,
-                session_id=request.session_id
+                session_id=request.session_id,
+                mode=request.mode,
+                enable_trace=request.enable_trace
             ):
                 # Convert dict response to Pydantic model for proper serialization
                 if isinstance(chunk, dict):
+                    # Ensure the chunk has the correct structure
+                    chunk["mode"] = request.mode
                     chunk_model = StreamChatResponse(**chunk)
                     yield f"data: {chunk_model.model_dump_json()}\n\n"
                 else:
@@ -169,12 +180,15 @@ async def chat_stream(request: ChatRequest):
             error_str = str(e).lower()
             if any(keyword in error_str for keyword in ['connection', 'network', 'timeout', 'unreachable', 'forbidden', '403', '404', 'dns']):
                 error_content = f"🔒 接続エラー: Azure OpenAIサービスへの接続に問題があります。これは閉域化設定やネットワーク制限が原因の可能性があります。システム管理者にネットワーク設定をご確認ください。詳細: {str(e)}"
+            elif request.mode == "agent" and any(keyword in error_str for keyword in ['agent', 'foundry', 'project']):
+                error_content = f"🤖 エージェントモードエラー: AI Foundryエージェントとの接続に問題があります。エージェント設定を確認してください。詳細: {str(e)}"
             else:
                 error_content = f"エラー: {str(e)}"
             
             error_response = StreamChatResponse(
                 content=error_content,
                 session_id=request.session_id or "error",
+                mode=request.mode,
                 is_done=True
             )
             yield f"data: {error_response.model_dump_json()}\n\n"

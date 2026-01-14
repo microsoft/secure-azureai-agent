@@ -15,7 +15,7 @@ python-multipart==0.0.20
 python-dotenv==1.1.1
 
 # Frontend 依存関係
-chainlit==2.7.1.1
+chainlit==2.8.5
 
 # 共通依存関係（重複削除済み）
 httpx==0.28.1

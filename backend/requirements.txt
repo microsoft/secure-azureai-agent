@@ -2,7 +2,7 @@ fastapi==0.116.1
 uvicorn==0.35.0
 gunicorn==23.0.0
 uvicorn[standard]==0.35.0
-semantic-kernel==1.36.0
+semantic-kernel==1.39.4
 azure-identity==1.24.0
 azure-keyvault-secrets==4.7.0
 azure-monitor-opentelemetry==1.6.7
